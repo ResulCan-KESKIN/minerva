@@ -2,7 +2,14 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 import plotly.graph_objects as go
-from config import DB_CONFIG
+
+DB_CONFIG = {
+    "host": st.secrets["DB_HOST"],
+    "port": st.secrets["DB_PORT"],
+    "database": st.secrets["DB_NAME"],
+    "user": st.secrets["DB_USER"],
+    "password": st.secrets["DB_PASSWORD"]
+}
 
 st.set_page_config(page_title="Minerva Dashboard", layout="wide")
 
