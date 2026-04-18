@@ -31,16 +31,9 @@ if sayfa == "📈 Fiyat Grafiği":
     st.subheader(f"📈 {secilen} Fiyat Grafiği")
 
     df = pd.read_sql(f"""
-    SELECT 
-        DATE(zaman) as zaman,
-        MIN(acilis) as acilis,
-        MAX(yuksek) as yuksek,
-        MIN(dusuk) as dusuk,
-        MAX(kapanis) as kapanis,
-        SUM(hacim) as hacim
+    SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
     FROM hisse_fiyatlari
     WHERE hisse_kodu = '{secilen}'
-    GROUP BY DATE(zaman)
     ORDER BY zaman
 """, conn)
 
