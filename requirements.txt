@@ -4,3 +4,4 @@ pandas
 plotly
 yfinance
 scikit-learn
+streamlit-lightweight-charts
