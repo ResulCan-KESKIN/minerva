@@ -2,7 +2,6 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 from streamlit_lightweight_charts import renderLightweightCharts
-import os
 
 DB_CONFIG = {
     "host": st.secrets["DB_HOST"],
@@ -31,21 +30,22 @@ if sayfa == "📈 Fiyat Grafiği":
     st.subheader(f"📈 {secilen} Fiyat Grafiği")
 
     df = pd.read_sql(f"""
-    SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
-    FROM hisse_fiyatlari
-    WHERE hisse_kodu = '{secilen}'
-    ORDER BY zaman
-""", conn)
+        SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
+        FROM hisse_fiyatlari
+        WHERE hisse_kodu = '{secilen}'
+        ORDER BY zaman
+    """, conn)
 
-    # Günlük gruplama Python'da
-    df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None).dt.date
-    df = df.groupby("zaman").agg(
+    df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None)
+    df["tarih"] = df["zaman"].dt.date
+    df = df.groupby("tarih").agg(
         acilis=("acilis", "first"),
         yuksek=("yuksek", "max"),
         dusuk=("dusuk", "min"),
         kapanis=("kapanis", "last"),
         hacim=("hacim", "sum")
     ).reset_index()
+    df["time"] = df["tarih"].astype(str)
 
     anomaliler = pd.read_sql(f"""
         SELECT baslangic_zaman, skor, durum
@@ -54,29 +54,18 @@ if sayfa == "📈 Fiyat Grafiği":
     """, conn)
 
     if not df.empty:
-        # Zaman damgasını unix timestamp'e çevir
-        df["zaman"] = pd.to_datetime(df["zaman"])
-        df["time"] = df["zaman"].astype("int64") // 10**9
-
-        # Candlestick verisi
         candle_data = df[["time", "acilis", "yuksek", "dusuk", "kapanis"]].rename(columns={
-            "acilis": "open",
-            "yuksek": "high",
-            "dusuk": "low",
-            "kapanis": "close"
+            "acilis": "open", "yuksek": "high", "dusuk": "low", "kapanis": "close"
         }).to_dict("records")
 
-        # Hacim verisi
         hacim_data = df[["time", "hacim"]].rename(columns={"hacim": "value"}).to_dict("records")
 
-        # Anomali işaretleri
         markers = []
         if not anomaliler.empty:
-            anomaliler["baslangic_zaman"] = pd.to_datetime(anomaliler["baslangic_zaman"]).dt.tz_localize(None)
-            anomaliler["time"] = anomaliler["baslangic_zaman"].astype("int64") // 10**9
+            anomaliler["tarih"] = pd.to_datetime(anomaliler["baslangic_zaman"]).dt.tz_localize(None).dt.date.astype(str)
             for _, row in anomaliler.iterrows():
                 markers.append({
-                    "time": int(row["time"]),
+                    "time": row["tarih"],
                     "position": "aboveBar",
                     "color": "#ff4444",
                     "shape": "arrowDown",
@@ -93,10 +82,7 @@ if sayfa == "📈 Fiyat Grafiği":
                 "horzLines": {"color": "#1e2130"}
             },
             "crosshair": {"mode": 1},
-            "timeScale": {
-                "borderColor": "#485c7b",
-                "timeVisible": True
-            }
+            "timeScale": {"borderColor": "#485c7b"}
         }
 
         series = [
@@ -122,8 +108,7 @@ if sayfa == "📈 Fiyat Grafiği":
                 }
             }
         ]
-        st.write(df.head())
-        st.write(df.dtypes)
+
         renderLightweightCharts([{
             "chart": chart_options,
             "series": series
@@ -181,7 +166,14 @@ elif sayfa == "✅ Değerlendirme":
 
                 if not df_detay.empty:
                     df_detay["zaman"] = pd.to_datetime(df_detay["zaman"]).dt.tz_localize(None)
-                    df_detay["time"] = df_detay["zaman"].astype("int64") // 10**9
+                    df_detay["tarih"] = df_detay["zaman"].dt.date
+                    df_detay = df_detay.groupby("tarih").agg(
+                        acilis=("acilis", "first"),
+                        yuksek=("yuksek", "max"),
+                        dusuk=("dusuk", "min"),
+                        kapanis=("kapanis", "last")
+                    ).reset_index()
+                    df_detay["time"] = df_detay["tarih"].astype(str)
 
                     detay_data = df_detay[["time", "acilis", "yuksek", "dusuk", "kapanis"]].rename(columns={
                         "acilis": "open", "yuksek": "high", "dusuk": "low", "kapanis": "close"
