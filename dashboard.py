@@ -25,17 +25,24 @@ st.title("🏛️ Minerva — BIST Anomali Tespiti")
 sayfa = st.sidebar.radio("Sayfa:", ["📈 Fiyat Grafiği", "🚨 Anomali Kayıtları", "✅ Değerlendirme"])
 
 hisseler = pd.read_sql("SELECT DISTINCT hisse_kodu FROM hisse_fiyatlari ORDER BY hisse_kodu", conn)
-secilen = st.sidebar.radio("Hisse seç:", hisseler["hisse_kodu"].tolist())
+secilen = st.sidebar.selectbox("Hisse seç:", hisseler["hisse_kodu"].tolist())
 
 if sayfa == "📈 Fiyat Grafiği":
     st.subheader(f"📈 {secilen} Fiyat Grafiği")
 
     df = pd.read_sql(f"""
-        SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
-        FROM hisse_fiyatlari
-        WHERE hisse_kodu = '{secilen}'
-        ORDER BY zaman
-    """, conn)
+    SELECT 
+        DATE(zaman) as zaman,
+        MIN(acilis) as acilis,
+        MAX(yuksek) as yuksek,
+        MIN(dusuk) as dusuk,
+        MAX(kapanis) as kapanis,
+        SUM(hacim) as hacim
+    FROM hisse_fiyatlari
+    WHERE hisse_kodu = '{secilen}'
+    GROUP BY DATE(zaman)
+    ORDER BY zaman
+""", conn)
 
     anomaliler = pd.read_sql(f"""
         SELECT baslangic_zaman, skor, durum

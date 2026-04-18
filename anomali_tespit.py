@@ -43,7 +43,7 @@ def anomali_tara(hisse_kodu):
 
     # Isolation Forest modeli
     model = IsolationForest(
-        contamination=0.05,   # Verinin %20'si anomali olabilir
+        contamination=0.02,   # Verinin %20'si anomali olabilir
         random_state=42
     )
     df["tahmin"] = model.fit_predict(X)
