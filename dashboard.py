@@ -31,18 +31,21 @@ if sayfa == "📈 Fiyat Grafiği":
     st.subheader(f"📈 {secilen} Fiyat Grafiği")
 
     df = pd.read_sql(f"""
-    SELECT 
-        DATE(zaman) as zaman,
-        (array_agg(acilis ORDER BY zaman))[1] as acilis,
-        MAX(yuksek) as yuksek,
-        MIN(dusuk) as dusuk,
-        (array_agg(kapanis ORDER BY zaman DESC))[1] as kapanis,
-        SUM(hacim) as hacim
+    SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
     FROM hisse_fiyatlari
     WHERE hisse_kodu = '{secilen}'
-    GROUP BY DATE(zaman)
     ORDER BY zaman
 """, conn)
+
+    # Günlük gruplama Python'da
+    df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None).dt.date
+    df = df.groupby("zaman").agg(
+        acilis=("acilis", "first"),
+        yuksek=("yuksek", "max"),
+        dusuk=("dusuk", "min"),
+        kapanis=("kapanis", "last"),
+        hacim=("hacim", "sum")
+    ).reset_index()
 
     anomaliler = pd.read_sql(f"""
         SELECT baslangic_zaman, skor, durum
@@ -52,7 +55,7 @@ if sayfa == "📈 Fiyat Grafiği":
 
     if not df.empty:
         # Zaman damgasını unix timestamp'e çevir
-        df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None)
+        df["zaman"] = pd.to_datetime(df["zaman"])
         df["time"] = df["zaman"].astype("int64") // 10**9
 
         # Candlestick verisi
