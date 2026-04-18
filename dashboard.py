@@ -33,10 +33,10 @@ if sayfa == "📈 Fiyat Grafiği":
     df = pd.read_sql(f"""
     SELECT 
         DATE(zaman) as zaman,
-        MIN(acilis) as acilis,
+        (array_agg(acilis ORDER BY zaman))[1] as acilis,
         MAX(yuksek) as yuksek,
         MIN(dusuk) as dusuk,
-        MAX(kapanis) as kapanis,
+        (array_agg(kapanis ORDER BY zaman DESC))[1] as kapanis,
         SUM(hacim) as hacim
     FROM hisse_fiyatlari
     WHERE hisse_kodu = '{secilen}'
