@@ -2,9 +2,16 @@ import psycopg2
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from datetime import datetime
-from config import DB_CONFIG
+import os
 
-# Veritabanı bağlantısı
+DB_CONFIG = {
+    "host": os.environ.get("DB_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("DB_PORT", 5432)),
+    "database": os.environ.get("DB_NAME", "minerva"),
+    "user": os.environ.get("DB_USER", "postgres"),
+    "password": os.environ.get("DB_PASSWORD", "110537")
+}
+
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
 
