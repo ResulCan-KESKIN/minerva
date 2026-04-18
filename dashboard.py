@@ -1,11 +1,12 @@
 import streamlit as st
 import psycopg2
 import pandas as pd
-import plotly.graph_objects as go
+from streamlit_lightweight_charts import renderLightweightCharts
+import os
 
 DB_CONFIG = {
     "host": st.secrets["DB_HOST"],
-    "port": st.secrets["DB_PORT"],
+    "port": int(st.secrets["DB_PORT"]),
     "database": st.secrets["DB_NAME"],
     "user": st.secrets["DB_USER"],
     "password": st.secrets["DB_PASSWORD"]
@@ -36,43 +37,87 @@ if sayfa == "📈 Fiyat Grafiği":
         ORDER BY zaman
     """, conn)
 
-    anomali_zamanlari = pd.read_sql(f"""
+    anomaliler = pd.read_sql(f"""
         SELECT baslangic_zaman, skor, durum
         FROM anomali_kayitlari
         WHERE hisse_kodu = '{secilen}'
     """, conn)
 
     if not df.empty:
-        fig = go.Figure(data=[go.Candlestick(
-            x=df["zaman"],
-            open=df["acilis"],
-            high=df["yuksek"],
-            low=df["dusuk"],
-            close=df["kapanis"],
-            name="Fiyat"
-        )])
+        # Zaman damgasını unix timestamp'e çevir
+        df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None)
+        df["time"] = df["zaman"].astype("int64") // 10**9
 
-        if not anomali_zamanlari.empty:
-            onaylandi = anomali_zamanlari[anomali_zamanlari["durum"] == "🔴 onaylandi"]
-            beklemede = anomali_zamanlari[anomali_zamanlari["durum"] == "🟡 beklemede"]
+        # Candlestick verisi
+        candle_data = df[["time", "acilis", "yuksek", "dusuk", "kapanis"]].rename(columns={
+            "acilis": "open",
+            "yuksek": "high",
+            "dusuk": "low",
+            "kapanis": "close"
+        }).to_dict("records")
 
-            for grup, renk, sembol in [
-                (beklemede, "orange", "triangle-down"),
-                (onaylandi, "red", "x")
-            ]:
-                if not grup.empty:
-                    eslesen = df[df["zaman"].isin(grup["baslangic_zaman"])]
-                    if not eslesen.empty:
-                        fig.add_trace(go.Scatter(
-                            x=eslesen["zaman"],
-                            y=eslesen["yuksek"] * 1.01,
-                            mode="markers",
-                            marker=dict(color=renk, size=12, symbol=sembol),
-                            name="Anomali"
-                        ))
+        # Hacim verisi
+        hacim_data = df[["time", "hacim"]].rename(columns={"hacim": "value"}).to_dict("records")
 
-        fig.update_layout(height=450, margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig, use_container_width=True, key="ana_grafik")
+        # Anomali işaretleri
+        markers = []
+        if not anomaliler.empty:
+            anomaliler["baslangic_zaman"] = pd.to_datetime(anomaliler["baslangic_zaman"]).dt.tz_localize(None)
+            anomaliler["time"] = anomaliler["baslangic_zaman"].astype("int64") // 10**9
+            for _, row in anomaliler.iterrows():
+                markers.append({
+                    "time": int(row["time"]),
+                    "position": "aboveBar",
+                    "color": "#ff4444",
+                    "shape": "arrowDown",
+                    "text": "⚠️"
+                })
+
+        chart_options = {
+            "layout": {
+                "background": {"type": "solid", "color": "#0e1117"},
+                "textColor": "#ffffff"
+            },
+            "grid": {
+                "vertLines": {"color": "#1e2130"},
+                "horzLines": {"color": "#1e2130"}
+            },
+            "crosshair": {"mode": 1},
+            "timeScale": {
+                "borderColor": "#485c7b",
+                "timeVisible": True
+            }
+        }
+
+        series = [
+            {
+                "type": "Candlestick",
+                "data": candle_data,
+                "markers": markers,
+                "options": {
+                    "upColor": "#26a69a",
+                    "downColor": "#ef5350",
+                    "borderVisible": False,
+                    "wickUpColor": "#26a69a",
+                    "wickDownColor": "#ef5350"
+                }
+            },
+            {
+                "type": "Histogram",
+                "data": hacim_data,
+                "options": {
+                    "color": "#385263",
+                    "priceFormat": {"type": "volume"},
+                    "priceScaleId": "volume"
+                }
+            }
+        ]
+
+        renderLightweightCharts([{
+            "chart": chart_options,
+            "series": series
+        }], key=f"chart_{secilen}")
+
     else:
         st.warning("Bu hisse için veri yok.")
 
@@ -93,7 +138,7 @@ elif sayfa == "🚨 Anomali Kayıtları":
     else:
         col1, col2, col3 = st.columns(3)
         col1.metric("Toplam", len(anomaliler))
-        col2.metric("Beklemede", len(anomaliler[anomaliler["durum"] == "🟡 beklemede"]))
+        col2.metric("Beklemede", len(anomaliler[anomaliler["durum"] == "beklemede"]))
         col3.metric("Onaylandı", len(anomaliler[anomaliler["durum"] == "🔴 onaylandi"]))
         st.dataframe(anomaliler, use_container_width=True)
 
@@ -113,10 +158,9 @@ elif sayfa == "✅ Değerlendirme":
     else:
         for _, satir in anomaliler.iterrows():
             with st.expander(f"📅 {str(satir['baslangic_zaman'])[:10]}  |  Skor: {round(satir['skor'], 4)}  |  {satir['durum']}"):
-                
-                # O tarihin etrafındaki fiyat verisini göster
+
                 df_detay = pd.read_sql(f"""
-                    SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
+                    SELECT zaman, acilis, kapanis, yuksek, dusuk
                     FROM hisse_fiyatlari
                     WHERE hisse_kodu = '{secilen}'
                     AND zaman BETWEEN '{satir['baslangic_zaman']}'::timestamptz - interval '10 days'
@@ -125,15 +169,31 @@ elif sayfa == "✅ Değerlendirme":
                 """, conn)
 
                 if not df_detay.empty:
-                    fig2 = go.Figure(data=[go.Candlestick(
-                        x=df_detay["zaman"],
-                        open=df_detay["acilis"],
-                        high=df_detay["yuksek"],
-                        low=df_detay["dusuk"],
-                        close=df_detay["kapanis"]
-                    )])
-                    fig2.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=0))
-                    st.plotly_chart(fig2, use_container_width=True, key=f"grafik_{satir['id']}")
+                    df_detay["zaman"] = pd.to_datetime(df_detay["zaman"]).dt.tz_localize(None)
+                    df_detay["time"] = df_detay["zaman"].astype("int64") // 10**9
+
+                    detay_data = df_detay[["time", "acilis", "yuksek", "dusuk", "kapanis"]].rename(columns={
+                        "acilis": "open", "yuksek": "high", "dusuk": "low", "kapanis": "close"
+                    }).to_dict("records")
+
+                    renderLightweightCharts([{
+                        "chart": {
+                            "layout": {"background": {"type": "solid", "color": "#0e1117"}, "textColor": "#ffffff"},
+                            "grid": {"vertLines": {"color": "#1e2130"}, "horzLines": {"color": "#1e2130"}},
+                            "height": 200
+                        },
+                        "series": [{
+                            "type": "Candlestick",
+                            "data": detay_data,
+                            "options": {
+                                "upColor": "#26a69a",
+                                "downColor": "#ef5350",
+                                "borderVisible": False,
+                                "wickUpColor": "#26a69a",
+                                "wickDownColor": "#ef5350"
+                            }
+                        }]
+                    }], key=f"detay_{satir['id']}")
 
                 not_metni = st.text_area("Not:", value=satir["notlar"] if satir["notlar"] else "", key=f"not_{satir['id']}")
 
