@@ -122,7 +122,8 @@ if sayfa == "📈 Fiyat Grafiği":
                 }
             }
         ]
-
+        st.write(df.head())
+        st.write(df.dtypes)
         renderLightweightCharts([{
             "chart": chart_options,
             "series": series
