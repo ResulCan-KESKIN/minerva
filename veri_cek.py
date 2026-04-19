@@ -1,6 +1,9 @@
-import yfinance as yf
 import psycopg2
 import os
+
+# Matriks'e geçince sadece bu satırı değiştir:
+# from matriks_adapter import MatriksAdapter as Adapter
+from yahoo_adapter import YahooAdapter as Adapter
 
 DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "127.0.0.1"),
@@ -19,35 +22,36 @@ HISSELER = [
     "SISE.IS", "PGSUS.IS", "TAVHL.IS", "TCELL.IS", "FROTO.IS"
 ]
 
+adapter = Adapter()
+
 def veri_cek_ve_kaydet(hisse_kodu):
-    hisse = yf.Ticker(hisse_kodu)
-    df = hisse.history(period="1d", interval="1d")
-    
+    df = adapter.gunluk_ohlcv(hisse_kodu, period="1d")
+
     if df.empty:
         print(f"{hisse_kodu} için veri gelmedi.")
         return
 
-    for zaman, satir in df.iterrows():
+    for _, satir in df.iterrows():
         cur.execute("""
             SELECT 1 FROM hisse_fiyatlari 
             WHERE hisse_kodu = %s AND zaman = %s
-        """, (hisse_kodu, zaman))
-        
+        """, (hisse_kodu, satir["zaman"]))
+
         if cur.fetchone() is None:
             cur.execute("""
                 INSERT INTO hisse_fiyatlari 
                     (zaman, hisse_kodu, acilis, kapanis, yuksek, dusuk, hacim)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
-                zaman,
+                satir["zaman"],
                 hisse_kodu,
-                float(satir["Open"]),
-                float(satir["Close"]),
-                float(satir["High"]),
-                float(satir["Low"]),
-                int(satir["Volume"])
+                float(satir["acilis"]),
+                float(satir["kapanis"]),
+                float(satir["yuksek"]),
+                float(satir["dusuk"]),
+                int(satir["hacim"])
             ))
-    
+
     conn.commit()
     print(f"{hisse_kodu}: veri eklendi.")
 
