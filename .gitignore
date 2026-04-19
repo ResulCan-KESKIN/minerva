@@ -3,3 +3,4 @@ config.py
 __pycache__/
 *.pyc
 *.pyo
+db_config.py
