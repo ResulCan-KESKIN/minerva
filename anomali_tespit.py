@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from datetime import datetime
 import os
 
 DB_CONFIG = {
@@ -15,7 +14,6 @@ DB_CONFIG = {
 }
 
 conn = psycopg2.connect(**DB_CONFIG)
-cur = conn.cursor()
 
 HISSELER = [
     "THYAO.IS", "GARAN.IS", "ASELS.IS", "EREGL.IS", "BIMAS.IS",
@@ -23,92 +21,96 @@ HISSELER = [
     "SISE.IS", "PGSUS.IS", "TAVHL.IS", "TCELL.IS", "FROTO.IS"
 ]
 
-def istatistiksel_motor(df, pencere=20):
-    # Fiyat değişimi ve aralık
-    df["fiyat_degisimi"] = df["kapanis"] - df["acilis"]
-    df["aralik"] = df["yuksek"] - df["dusuk"]
-    df["hacim"] = df["hacim"].fillna(0)
-
-    # Rolling istatistikler (20 mum penceresi)
-    for kolon in ["fiyat_degisimi", "aralik", "hacim"]:
-        ort = df[kolon].rolling(pencere, min_periods=1).mean()
-        std = df[kolon].rolling(pencere, min_periods=1).std().replace(0, np.nan)
-        df[f"{kolon}_zscore"] = (df[kolon] - ort) / std
-
-    df[[c for c in df.columns if c.endswith("_zscore")]] = (
-        df[[c for c in df.columns if c.endswith("_zscore")]].fillna(0)
-    )
-
-    # Z-score'u yüksek olanları ön-filtrele (|z| > 4 → kesin aykırı, modele verme)
-    z_cols = [c for c in df.columns if c.endswith("_zscore")]
-    df["z_max"] = df[z_cols].abs().max(axis=1)
-    df["kesin_anomali"] = df["z_max"] > 4
-
-    # StandardScaler ile ölçekle
-    feature_cols = ["fiyat_degisimi", "aralik", "hacim",
-                    "fiyat_degisimi_zscore", "aralik_zscore", "hacim_zscore"]
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(df[feature_cols])
-
-    return df, X_scaled
-
 def anomali_tara(hisse_kodu):
+    # Feature cache'den veri çek
     df = pd.read_sql("""
-        SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
-        FROM hisse_fiyatlari
-        WHERE hisse_kodu = %s
-        ORDER BY zaman
+        SELECT 
+            f.tarih,
+            f.fiyat_degisimi_5g,
+            f.fiyat_degisimi_20g,
+            f.fiyat_degisimi_60g,
+            f.volatilite_5g,
+            f.volatilite_20g,
+            f.volatilite_60g,
+            f.rvol_5g,
+            f.rvol_20g,
+            f.fiyat_bant_genisligi_5g,
+            f.fiyat_bant_genisligi_20g
+        FROM feature_cache f
+        WHERE f.hisse_kodu = %s
+        ORDER BY f.tarih
     """, conn, params=(hisse_kodu,))
 
-    if len(df) < 5:
-        print(f"{hisse_kodu}: Yeterli veri yok, atlanıyor.")
+    if len(df) < 30:
+        print(f"{hisse_kodu}: Yeterli feature verisi yok, atlanıyor.")
         return
 
-    # İstatistiksel motor
-    df, X_scaled = istatistiksel_motor(df)
+    df["tarih"] = pd.to_datetime(df["tarih"])
+    df = df.dropna()
 
-    # Isolation Forest — artık ölçeklenmiş + zenginleştirilmiş feature'larla
-    model = IsolationForest(
-        contamination=0.02,
-        random_state=42
-    )
+    # Z-score ile kesin anomali tespiti
+    z_features = ["fiyat_degisimi_5g", "volatilite_5g", "rvol_5g", "fiyat_bant_genisligi_5g"]
+    for kolon in z_features:
+        ort = df[kolon].rolling(20, min_periods=5).mean()
+        std = df[kolon].rolling(20, min_periods=5).std().replace(0, np.nan)
+        df[f"{kolon}_z"] = (df[kolon] - ort) / std
+
+    df["z_max"] = df[[f"{k}_z" for k in z_features]].abs().max(axis=1)
+    df["kesin_anomali"] = df["z_max"] > 4
+
+    # Feature seti
+    feature_kolonlar = [
+        "fiyat_degisimi_5g", "fiyat_degisimi_20g", "fiyat_degisimi_60g",
+        "volatilite_5g", "volatilite_20g", "volatilite_60g",
+        "rvol_5g", "rvol_20g",
+        "fiyat_bant_genisligi_5g", "fiyat_bant_genisligi_20g"
+    ]
+
+    df = df.dropna(subset=feature_kolonlar)
+    if len(df) < 10:
+        return
+
+    X = df[feature_kolonlar].copy()
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Isolation Forest
+    model = IsolationForest(contamination=0.02, random_state=42)
     df["tahmin"] = model.fit_predict(X_scaled)
-    df["skor"] = model.score_samples(X_scaled)
+    df["if_skor"] = model.score_samples(X_scaled)
 
-    # Kesin anomalileri de anomali say (IF -1 demese bile)
+    # Kesin anomalileri de dahil et
     df.loc[df["kesin_anomali"], "tahmin"] = -1
 
-    # -1 = anomali, 1 = normal
     anomaliler = df[df["tahmin"] == -1]
+    print(f"{hisse_kodu}: {len(anomaliler)} anomali ({df['kesin_anomali'].sum()} kesin z-score)")
 
-    print(f"{hisse_kodu}: {len(anomaliler)} anomali tespit edildi.")
-
+    cur = conn.cursor()
     for _, satir in anomaliler.iterrows():
-        # Daha önce kaydedilmiş mi kontrol et
         cur.execute("""
             SELECT id FROM anomali_kayitlari
-            WHERE hisse_kodu = %s AND baslangic_zaman = %s
-        """, (hisse_kodu, satir["zaman"]))
+            WHERE hisse_kodu = %s AND baslangic_zaman::date = %s
+        """, (hisse_kodu, satir["tarih"].date()))
 
         if cur.fetchone() is None:
+            tip = "kesin_anomali" if satir["kesin_anomali"] else "isolation_forest"
             cur.execute("""
                 INSERT INTO anomali_kayitlari
                     (hisse_kodu, anomali_tipi, skor, baslangic_zaman, durum)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
                 hisse_kodu,
-                "isolation_forest",
-                float(satir["skor"]),
-                satir["zaman"],
+                tip,
+                float(satir["if_skor"]),
+                satir["tarih"],
                 "beklemede"
             ))
-
     conn.commit()
+    cur.close()
 
 if __name__ == "__main__":
     print("Anomali taraması başladı...")
     for hisse in HISSELER:
         anomali_tara(hisse)
     print("Tarama tamamlandı.")
-    cur.close()
     conn.close()
