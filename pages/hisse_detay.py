@@ -23,7 +23,7 @@ def goster(secilen):
         """, conn, params=(secilen,))
 
         if not df.empty:
-            candlestick_goster(df, anomaliler, key=f"chart_{secilen}", yukseklik=600)
+            candlestick_goster(df, anomaliler, key=f"chart_{secilen}", yukseklik=450)
         else:
             st.info("Veri bulunamadi.")
 

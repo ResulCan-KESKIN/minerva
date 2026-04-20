@@ -77,7 +77,11 @@ def candlestick_goster(df, anomaliler=None, key="grafik", yukseklik=450):
                 "options": {
                     "color": "#1e2a3a",
                     "priceFormat": {"type": "volume"},
-                    "priceScaleId": "volume"
+                    "priceScaleId": "volume",
+                    "scaleMargins": {
+                        "top": 0.8,
+                        "bottom": 0
+                    }
                 }
             }
         ]
