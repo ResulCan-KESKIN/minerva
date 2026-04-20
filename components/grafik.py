@@ -55,6 +55,8 @@ def candlestick_goster(df, anomaliler=None, key="grafik", yukseklik=450):
 
     chart = dict(CHART_STYLE)
     chart["height"] = yukseklik
+    chart["leftPriceScale"] = {"visible": False}
+    chart["rightPriceScale"] = {"scaleMargins": {"top": 0.1, "bottom": 0.2}}
 
     renderLightweightCharts([{
         "chart": chart,
@@ -71,18 +73,6 @@ def candlestick_goster(df, anomaliler=None, key="grafik", yukseklik=450):
                     "wickDownColor": "#ef4444"
                 }
             },
-            {
-                "type": "Histogram",
-                "data": hacim_data,
-                "options": {
-                    "color": "#1e2a3a",
-                    "priceFormat": {"type": "volume"},
-                    "priceScaleId": "volume",
-                    "scaleMargins": {
-                        "top": 0.8,
-                        "bottom": 0
-                    }
-                }
-            }
+            
         ]
     }], key=key)
