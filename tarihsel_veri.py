@@ -8,9 +8,9 @@ cur = conn.cursor()
 
 # Pilot hisse listesi (Tunahan/İbrahim onaylayana kadar geçici)
 HISSELER = [
-    "THYAO.IS", "GARAN.IS", "ASELS.IS", "EREGL.IS", "BIMAS.IS",
-    "AKBNK.IS", "YKBNK.IS", "KCHOL.IS", "SAHOL.IS", "TUPRS.IS",
-    "SISE.IS", "PGSUS.IS", "TAVHL.IS", "TCELL.IS", "FROTO.IS"
+    "TEHOL.IS", "DERHL.IS", "CRDFA.IS", "ADESE.IS", "DSTKF.IS",
+    "VSNMD.IS", "HEDEF.IS", "EMKEL.IS", "ALCATEL.IS", "SASA.IS",
+    "ASELS.IS", "GZNMI.IS", "BORLS.IS", "SUNTK.IS", "SEGYO.IS"
 ]
 
 def tarihsel_veri_cek(hisse_kodu):
