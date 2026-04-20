@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 from datetime import datetime, timedelta
-from db_config import DB_CONFIG
+
 
 
 DB_CONFIG = {
