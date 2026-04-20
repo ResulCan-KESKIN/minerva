@@ -49,6 +49,42 @@ for satir in anomaliler:
 
 bulut.commit()
 print(f"{len(anomaliler)} anomali kaydı taşındı.")
+# Feature cache taşı
+# Feature cache taşı
+print("Feature cache taşınıyor...")
+yerel_cur.execute("""
+    SELECT tarih, hisse_kodu,
+           fiyat_degisimi_5g, fiyat_degisimi_20g, fiyat_degisimi_60g,
+           volatilite_5g, volatilite_20g, volatilite_60g,
+           fiyat_bant_genisligi_5g, fiyat_bant_genisligi_20g,
+           hacim_ort_5g, hacim_ort_20g, hacim_ort_60g,
+           rvol_5g, rvol_20g
+    FROM feature_cache
+""")
+feature_satirlar = yerel_cur.fetchall()
+
+# 100'er satır parçalara böl
+PARCA = 100
+toplam = 0
+for i in range(0, len(feature_satirlar), PARCA):
+    parca = feature_satirlar[i:i+PARCA]
+    for satir in parca:
+        bulut_cur.execute("""
+            INSERT INTO feature_cache (
+                tarih, hisse_kodu,
+                fiyat_degisimi_5g, fiyat_degisimi_20g, fiyat_degisimi_60g,
+                volatilite_5g, volatilite_20g, volatilite_60g,
+                fiyat_bant_genisligi_5g, fiyat_bant_genisligi_20g,
+                hacim_ort_5g, hacim_ort_20g, hacim_ort_60g,
+                rvol_5g, rvol_20g
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tarih, hisse_kodu) DO NOTHING
+        """, satir)
+    bulut.commit()
+    toplam += len(parca)
+    print(f"{toplam}/{len(feature_satirlar)} satır taşındı...")
+
+print(f"Feature cache tamamlandı: {toplam} satır.")
 
 print("Taşıma tamamlandı!")
 yerel_cur.close()
