@@ -21,7 +21,7 @@ conn = baglanti()
 
 st.title("🏛️ Minerva — BIST Anomali Tespiti")
 
-sayfa = st.sidebar.radio("Sayfa:", ["📈 Fiyat Grafiği", "🚨 Anomali Kayıtları", "✅ Değerlendirme"])
+sayfa = st.sidebar.radio("Sayfa:", ["📈 Fiyat Grafiği", "🚨 Anomali Kayıtları", "✅ Değerlendirme", "📊 Feature Analizi"])
 
 hisseler = pd.read_sql("SELECT DISTINCT hisse_kodu FROM hisse_fiyatlari ORDER BY hisse_kodu", conn)
 secilen = st.sidebar.selectbox("Hisse seç:", hisseler["hisse_kodu"].tolist())
@@ -228,3 +228,59 @@ elif sayfa == "✅ Değerlendirme":
                     cur.close()
                     st.success("Not kaydedildi!")
                     st.rerun()
+    
+elif sayfa == "📊 Feature Analizi":
+    st.subheader(f"📊 {secilen} — Feature Analizi")
+
+    feature_df = pd.read_sql(f"""
+        SELECT tarih,
+               fiyat_degisimi_5g, fiyat_degisimi_20g, fiyat_degisimi_60g,
+               volatilite_5g, volatilite_20g, volatilite_60g,
+               rvol_5g, rvol_20g,
+               fiyat_bant_genisligi_5g, fiyat_bant_genisligi_20g
+        FROM feature_cache
+        WHERE hisse_kodu = '{secilen}'
+        ORDER BY tarih DESC
+        LIMIT 60
+    """, conn)
+
+    if feature_df.empty:
+        st.info("Bu hisse için feature verisi yok.")
+    else:
+        feature_df["tarih"] = pd.to_datetime(feature_df["tarih"])
+        feature_df = feature_df.sort_values("tarih")
+
+        # RVOL
+        st.markdown("#### 📈 Göreceli Hacim (RVOL)")
+        st.caption("1.0 = normal hacim. 2.0 = normalin 2 katı hacim.")
+        col1, col2 = st.columns(2)
+        son = feature_df.iloc[-1]
+        col1.metric("RVOL 5G", f"{son['rvol_5g']:.2f}")
+        col2.metric("RVOL 20G", f"{son['rvol_20g']:.2f}")
+        st.line_chart(feature_df.set_index("tarih")[["rvol_5g", "rvol_20g"]])
+
+        # Volatilite
+        st.markdown("#### 🌊 Volatilite")
+        st.caption("Günlük fiyat değişiminin standart sapması.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Vol 5G", f"{son['volatilite_5g']:.4f}")
+        col2.metric("Vol 20G", f"{son['volatilite_20g']:.4f}")
+        col3.metric("Vol 60G", f"{son['volatilite_60g']:.4f}")
+        st.line_chart(feature_df.set_index("tarih")[["volatilite_5g", "volatilite_20g", "volatilite_60g"]])
+
+        # Fiyat değişimi
+        st.markdown("#### 💹 Kümülatif Fiyat Değişimi")
+        st.caption("Seçilen pencerede toplam fiyat değişimi.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("5 Günlük", f"{son['fiyat_degisimi_5g']*100:.2f}%")
+        col2.metric("20 Günlük", f"{son['fiyat_degisimi_20g']*100:.2f}%")
+        col3.metric("60 Günlük", f"{son['fiyat_degisimi_60g']*100:.2f}%")
+
+        # Fiyat bant genişliği
+        st.markdown("#### 📏 Fiyat Bant Genişliği")
+        st.caption("(Yüksek - Düşük) / Kapanış ortalaması. Daralma = sıkışma sinyali.")
+        st.line_chart(feature_df.set_index("tarih")[["fiyat_bant_genisligi_5g", "fiyat_bant_genisligi_20g"]])
+
+        # Ham tablo
+        with st.expander("📋 Ham Veri"):
+            st.dataframe(feature_df, use_container_width=True)
