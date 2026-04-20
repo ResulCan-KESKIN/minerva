@@ -1,15 +1,21 @@
 import yfinance as yf
 import psycopg2
 import pandas as pd
-from config import DB_CONFIG
-
+import os
+DB_CONFIG = {
+    "host": os.environ.get("DB_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("DB_PORT", 5432)),
+    "database": os.environ.get("DB_NAME", "minerva"),
+    "user": os.environ.get("DB_USER", "postgres"),
+    "password": os.environ.get("DB_PASSWORD", "110537")
+}
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
 
 # Pilot hisse listesi (Tunahan/İbrahim onaylayana kadar geçici)
 HISSELER = [
     "TEHOL.IS", "DERHL.IS", "CRDFA.IS", "ADESE.IS", "DSTKF.IS",
-    "VSNMD.IS", "HEDEF.IS", "EMKEL.IS", "ALCATEL.IS", "SASA.IS",
+    "VSNMD.IS", "HEDEF.IS", "EMKEL.IS", "ALCTL.IS", "SASA.IS",
     "ASELS.IS", "GZNMI.IS", "BORLS.IS", "SUNTK.IS", "SEGYO.IS"
 ]
 

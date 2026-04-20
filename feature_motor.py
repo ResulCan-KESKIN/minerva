@@ -18,7 +18,7 @@ conn = psycopg2.connect(**DB_CONFIG)
 
 HISSELER = [
     "TEHOL.IS", "DERHL.IS", "CRDFA.IS", "ADESE.IS", "DSTKF.IS",
-    "VSNMD.IS", "HEDEF.IS", "EMKEL.IS", "ALCATEL.IS", "SASA.IS",
+    "VSNMD.IS", "HEDEF.IS", "EMKEL.IS", "ALCTL.IS", "SASA.IS",
     "ASELS.IS", "GZNMI.IS", "BORLS.IS", "SUNTK.IS", "SEGYO.IS"
 ]
 
