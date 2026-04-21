@@ -76,11 +76,11 @@ def goster(secilen: str = None):
     df = pd.read_sql("""
         SELECT
             price_date,
-            z_score_60,
-            z_score_120,
-            z_score_robust_60,
-            z_score_robust_120
-        FROM volume_analysis
+            z_log_60,
+            z_log_120,
+            rz_log_60,
+            rz_log_120
+        FROM minerva_signals
         WHERE stock_id = %s
         ORDER BY price_date
     """, ext_conn, params=(stock_id,))
@@ -107,10 +107,10 @@ def goster(secilen: str = None):
 
     # ── ECDF Grafiği ──
     seriler = [
-        ("Z-Score 60g",         "z_score_60",         "#3b82f6"),
-        ("Z-Score 120g",        "z_score_120",         "#06b6d4"),
-        ("Robust Z-Score 60g",  "z_score_robust_60",  "#f59e0b"),
-        ("Robust Z-Score 120g", "z_score_robust_120", "#10b981"),
+        ("Z-Score 60g",         "z_log_60",   "#3b82f6"),
+        ("Z-Score 120g",        "z_log_120",  "#06b6d4"),
+        ("Robust Z-Score 60g",  "rz_log_60",  "#f59e0b"),
+        ("Robust Z-Score 120g", "rz_log_120", "#10b981"),
     ]
 
     try:

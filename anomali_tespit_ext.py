@@ -1,8 +1,9 @@
 # anomali_tespit_ext.py — minerva_signals tablosundan Z-Score anomali tespiti
-# Yöntem: Adj Close + Log Getiri Z-Score dağılımının en uç %5'i
+# Yöntem: ≥120g → ECDF 4 seri | 60-119g → ECDF 60g seriler | <60g → t-dağılımı
 import psycopg2
 import pandas as pd
 import numpy as np
+from scipy import stats
 import os
 import warnings
 
@@ -89,58 +90,89 @@ def fiyat_hacim_uyumsuzlugu(df: pd.DataFrame) -> pd.DataFrame:
 # BÖLÜM 3 — ANOMALİ TESPİTİ
 # ═══════════════════════════════════════════════════════════════
 
+def _kaydet(cur, symbol: str, tip: str, skor: float, tarih, kaynak: str):
+    cur.execute("""
+        SELECT id FROM anomali_kayitlari
+        WHERE hisse_kodu = %s AND anomali_tipi = %s AND baslangic_zaman::date = %s
+    """, (symbol, tip, tarih))
+    if cur.fetchone() is None:
+        cur.execute("""
+            INSERT INTO anomali_kayitlari
+                (hisse_kodu, anomali_tipi, skor, baslangic_zaman, durum, kaynak)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (symbol, tip, float(skor), tarih, "beklemede", kaynak))
+        return 1
+    return 0
+
+
+def _ecdf_anomaliler(df: pd.DataFrame, tanimlar: list[tuple[str, str]]) -> list[tuple]:
+    """ECDF %95 eşiği ile anomali satırlarını döndür: (tip, skor, tarih, kaynak)"""
+    sonuclar = []
+    for kolon, tip in tanimlar:
+        seri = df[["price_date", kolon]].dropna()
+        if len(seri) < 10:
+            continue
+        esik = seri[kolon].abs().quantile(0.95)
+        for _, satir in seri[seri[kolon].abs() >= esik].iterrows():
+            sonuclar.append((tip, float(satir[kolon].abs()), satir["price_date"].date(), "minerva_signals"))
+    return sonuclar
+
+
+def _t_dagilimi_anomaliler(df: pd.DataFrame) -> list[tuple]:
+    """t-dağılımı ile log_getiri anomalilerini tespit et: (tip, skor, tarih, kaynak)"""
+    seri = df[["price_date", "log_getiri"]].dropna()
+    if len(seri) < 5:
+        return []
+
+    n = len(seri)
+    mu = seri["log_getiri"].mean()
+    se = seri["log_getiri"].std(ddof=1) / np.sqrt(n)
+    if se == 0:
+        return []
+
+    # %95 eşiği için iki yönlü t kritik değeri (df = n-1)
+    t_kritik = stats.t.ppf(0.95, df=n - 1)
+
+    sonuclar = []
+    for _, satir in seri.iterrows():
+        t_stat = abs((satir["log_getiri"] - mu) / (seri["log_getiri"].std(ddof=1) or 1))
+        if t_stat >= t_kritik:
+            sonuclar.append(("anomali_t", float(t_stat), satir["price_date"].date(), "t_dagilimi"))
+    return sonuclar
+
+
 def anomali_tara(stock_id: int, symbol: str):
     df = zscore_verisi_cek(stock_id)
+    n = len(df)
 
-    if len(df) < 120:
-        print(f"{symbol}: Yeterli veri yok ({len(df)} gün), atlanıyor.")
+    if n == 0:
+        print(f"{symbol}: Veri yok, atlanıyor.")
         return
 
     df["price_date"] = pd.to_datetime(df["price_date"])
-
     cur = conn.cursor()
     toplam = 0
 
-    # Her Z-Score için bağımsız anomali tespiti
-    for kolon, tip in ZSCORE_TANIMLARI:
-        seri = df[["price_date", kolon]].dropna()
+    if n >= 120:
+        # Tam ECDF — 4 seri
+        anomaliler = _ecdf_anomaliler(df, ZSCORE_TANIMLARI)
+        mod = "ECDF 4 seri"
+    elif n >= 60:
+        # Kısmi ECDF — yalnızca 60g seriler
+        tanimlar_60 = [t for t in ZSCORE_TANIMLARI if "60" in t[0]]
+        anomaliler = _ecdf_anomaliler(df, tanimlar_60)
+        mod = "ECDF 60g"
+    else:
+        # t-dağılımı
+        anomaliler = _t_dagilimi_anomaliler(df)
+        mod = "t-dağılımı"
 
-        if len(seri) < 30:
-            continue
-
-        # Bu kolonun kendi %95 eşiği (mutlak değer üzerinden)
-        esik = seri[kolon].abs().quantile(0.95)
-
-        # Eşiği aşan günler anomali
-        anomaliler = seri[seri[kolon].abs() >= esik].copy()
-        anomaliler["skor"] = anomaliler[kolon].abs()
-
-        for _, satir in anomaliler.iterrows():
-            cur.execute("""
-                SELECT id FROM anomali_kayitlari
-                WHERE hisse_kodu = %s
-                AND anomali_tipi = %s
-                AND baslangic_zaman::date = %s
-            """, (symbol, tip, satir["price_date"].date()))
-
-            if cur.fetchone() is None:
-                cur.execute("""
-                    INSERT INTO anomali_kayitlari
-                        (hisse_kodu, anomali_tipi, skor, baslangic_zaman, durum, kaynak)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    symbol,
-                    tip,
-                    float(satir["skor"]),
-                    satir["price_date"],
-                    "beklemede",
-                    "minerva_signals"
-                ))
-                toplam += 1
+    for tip, skor, tarih, kaynak in anomaliler:
+        toplam += _kaydet(cur, symbol, tip, skor, tarih, kaynak)
 
     conn.commit()
     cur.close()
-    print(f"{symbol}: {toplam} yeni anomali kaydedildi.")
+    print(f"{symbol} [{mod}]: {toplam} yeni anomali kaydedildi.")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -148,7 +180,7 @@ def anomali_tara(stock_id: int, symbol: str):
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("Minerva Anomali Tespiti Başladı (minerva_signals → %95 Persantil)...")
+    print("Minerva Anomali Tespiti Başladı (≥120g ECDF | 60-119g ECDF-60 | <60g t-dağılımı)...")
     print("=" * 60)
 
     hisseler = hisseleri_cek()
