@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from db import get_conn
-from pages import genel_bakis, hisse_detay, degerlendirme, sistem, ecdf
+from pages import genel_bakis, hisse_detay, degerlendirme, sistem, ecdf, backtest
 
 st.set_page_config(
     page_title="Minerva — Anomali Tespiti",
@@ -59,7 +59,7 @@ col_nav, col_hisse = st.columns([7, 2])
 with col_nav:
     sayfa = st.radio(
         "Sayfa",
-        ["Genel Bakis", "Hisse Detay", "Degerlendirme", "ECDF", "Sistem"],
+        ["Genel Bakis", "Hisse Detay", "Degerlendirme", "ECDF", "Backtest", "Sistem"],
         horizontal=True,
         label_visibility="collapsed"
     )
@@ -87,5 +87,7 @@ elif sayfa == "Degerlendirme":
     degerlendirme.goster(secilen)
 elif sayfa == "ECDF":
     ecdf.goster(secilen)
+elif sayfa == "Backtest":
+    backtest.goster()
 elif sayfa == "Sistem":
     sistem.goster()

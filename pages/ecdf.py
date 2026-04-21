@@ -259,9 +259,16 @@ def goster(secilen: str = None):
         """, unsafe_allow_html=True)
     else:
         def tip_badge(tip):
-            if tip == "kesin_anomali":
-                return '<span style="color:#ef4444;font-size:10px">● KESİN</span>'
-            return '<span style="color:#f59e0b;font-size:10px">○ SOFT</span>'
+            renk_map = {
+                "kesin_anomali": ("#ef4444", "● KESİN"),
+                "anomali_z60":   ("#3b82f6", "Z-60"),
+                "anomali_z120":  ("#06b6d4", "Z-120"),
+                "anomali_rz60":  ("#f59e0b", "RZ-60"),
+                "anomali_rz120": ("#10b981", "RZ-120"),
+                "anomali_t":     ("#a78bfa", "T-DAĞILIM"),
+            }
+            renk, etiket = renk_map.get(tip, ("#666680", tip))
+            return f'<span style="color:{renk};font-size:10px">{etiket}</span>'
 
         def durum_badge(durum):
             if "onaylandi" in str(durum):

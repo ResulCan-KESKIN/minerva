@@ -19,7 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri yükle
-        run: pip install psycopg2-binary yfinance pandas numpy
+        run: pip install psycopg2-binary yfinance pandas numpy scipy
 
       - name: Adj Close güncelle ve Z-Score hesapla
         env:
