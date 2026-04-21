@@ -1,8 +1,9 @@
-# minerva_guncelle.py — Günlük adj close çekip minerva_signals güncelle
+# minerva_guncelle.py — Günlük adj close toplu çekme ve Z-Score güncelleme
 import psycopg2
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import time
 import os
 import warnings
 
@@ -17,6 +18,7 @@ DB_CONFIG = {
 }
 
 conn = psycopg2.connect(**DB_CONFIG)
+GRUP_BOYUTU = 50
 
 
 def robust_zscore(seri: pd.Series, pencere: int) -> pd.Series:
@@ -47,61 +49,24 @@ def hisseleri_cek() -> list[tuple[int, str]]:
     return hisseler
 
 
-def hisse_guncelle(stock_id: int, symbol: str):
-    ticker = f"{symbol}.IS"
-
-    # Son 130 günü çek (Z-Score için yeterli geçmiş)
-    try:
-        df = yf.download(ticker, period="130d", auto_adjust=True, progress=False)
-    except Exception as e:
-        print(f"  {symbol}: yfinance hatası — {e}")
-        return 0
-
-    if df.empty:
-        print(f"  {symbol}: Veri gelmedi.")
-        return 0
-
-    df = df[["Close"]].copy()
-    df.columns = ["adj_close"]
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    df["price_date"] = df.index.date
-    df = df.reset_index(drop=True).dropna(subset=["adj_close"])
-
-    if len(df) < 5:
-        return 0
-
-    # DB'deki mevcut veriyle birleştirerek Z-Score hesapla
-    mevcut = pd.read_sql("""
+def mevcut_veri_cek(stock_id: int) -> pd.DataFrame:
+    """DB'deki son 130 günlük adj_close verisini çek."""
+    return pd.read_sql("""
         SELECT price_date, adj_close FROM minerva_signals
         WHERE stock_id = %s
-        ORDER BY price_date
+        ORDER BY price_date DESC
+        LIMIT 130
     """, conn, params=(stock_id,))
 
-    mevcut["price_date"] = pd.to_datetime(mevcut["price_date"])
-    df["price_date"] = pd.to_datetime(df["price_date"])
 
-    # Birleştir, yeni günleri ekle
-    birlesik = pd.concat([mevcut, df]).drop_duplicates(
-        subset="price_date", keep="last"
-    ).sort_values("price_date").reset_index(drop=True)
-
-    # Tüm seri üzerinden Z-Score hesapla
-    birlesik["log_getiri"] = np.log(birlesik["adj_close"] / birlesik["adj_close"].shift(1))
-    birlesik["z_log_60"]   = klasik_zscore(birlesik["log_getiri"], 60)
-    birlesik["z_log_120"]  = klasik_zscore(birlesik["log_getiri"], 120)
-    birlesik["rz_log_60"]  = robust_zscore(birlesik["log_getiri"], 60)
-    birlesik["rz_log_120"] = robust_zscore(birlesik["log_getiri"], 120)
-
-    # Sadece son 130 günü yaz (gerisi zaten var)
-    son_130 = birlesik.tail(130)
-
+def db_yaz(stock_id: int, df: pd.DataFrame) -> int:
     cur = conn.cursor()
     eklenen = 0
 
     def safe(v):
         return None if (v is None or (isinstance(v, float) and np.isnan(v))) else float(v)
 
-    for _, satir in son_130.iterrows():
+    for _, satir in df.iterrows():
         try:
             cur.execute("""
                 INSERT INTO minerva_signals
@@ -117,7 +82,7 @@ def hisse_guncelle(stock_id: int, symbol: str):
                     rz_log_120 = EXCLUDED.rz_log_120
             """, (
                 stock_id,
-                satir["price_date"].date(),
+                satir["price_date"].date() if hasattr(satir["price_date"], "date") else satir["price_date"],
                 safe(satir["adj_close"]),
                 safe(satir["log_getiri"]),
                 safe(satir["z_log_60"]),
@@ -127,7 +92,7 @@ def hisse_guncelle(stock_id: int, symbol: str):
             ))
             eklenen += 1
         except Exception as e:
-            print(f"  {symbol} satır hatası: {e}")
+            print(f"  Satır hatası: {e}")
             continue
 
     conn.commit()
@@ -135,21 +100,86 @@ def hisse_guncelle(stock_id: int, symbol: str):
     return eklenen
 
 
+def grup_isle(grup: list[tuple[int, str]]) -> int:
+    """50 hisseyi toplu çek, hesapla, yaz."""
+    tickerlar = [f"{s}.IS" for _, s in grup]
+    id_map = {f"{s}.IS": sid for sid, s in grup}
+
+    try:
+        raw = yf.download(
+            tickerlar,
+            period="130d",
+            auto_adjust=True,
+            group_by="ticker",
+            progress=False,
+            threads=True
+        )
+    except Exception as e:
+        print(f"  Grup çekme hatası: {e}")
+        return 0
+
+    toplam = 0
+
+    for ticker, stock_id in id_map.items():
+        symbol = ticker.replace(".IS", "")
+        try:
+            # Tek veya çoklu hisse formatı
+            if len(tickerlar) == 1:
+                yeni = raw[["Close"]].copy()
+            else:
+                if ticker not in raw.columns.get_level_values(0):
+                    print(f"  {symbol}: Veri yok.")
+                    continue
+                yeni = raw[ticker][["Close"]].copy()
+
+            yeni.columns = ["adj_close"]
+            yeni.index = pd.to_datetime(yeni.index).tz_localize(None)
+            yeni["price_date"] = pd.to_datetime(yeni.index.date)
+            yeni = yeni.reset_index(drop=True).dropna(subset=["adj_close"])
+
+            if yeni.empty:
+                continue
+
+            # DB'deki mevcut veriyle birleştir
+            mevcut = mevcut_veri_cek(stock_id)
+            mevcut["price_date"] = pd.to_datetime(mevcut["price_date"])
+
+            birlesik = pd.concat([mevcut, yeni]).drop_duplicates(
+                subset="price_date", keep="last"
+            ).sort_values("price_date").reset_index(drop=True)
+
+            # Z-Score hesapla
+            birlesik["log_getiri"] = np.log(birlesik["adj_close"] / birlesik["adj_close"].shift(1))
+            birlesik["z_log_60"]   = klasik_zscore(birlesik["log_getiri"], 60)
+            birlesik["z_log_120"]  = klasik_zscore(birlesik["log_getiri"], 120)
+            birlesik["rz_log_60"]  = robust_zscore(birlesik["log_getiri"], 60)
+            birlesik["rz_log_120"] = robust_zscore(birlesik["log_getiri"], 120)
+
+            # Sadece son 5 günü yaz (yeni günler)
+            son_5 = birlesik.tail(5)
+            eklenen = db_yaz(stock_id, son_5)
+            print(f"  {symbol}: {eklenen} satır güncellendi.")
+            toplam += eklenen
+
+        except Exception as e:
+            print(f"  {symbol}: HATA — {e}")
+
+    return toplam
+
+
 if __name__ == "__main__":
-    print("Minerva Günlük Güncelleme Başladı...")
+    print("Minerva Günlük Güncelleme Başladı (Toplu Çekme)...")
     print("=" * 60)
 
     hisseler = hisseleri_cek()
     print(f"{len(hisseler)} hisse güncellenecek.\n")
 
     toplam = 0
-    for stock_id, symbol in hisseler:
-        try:
-            eklenen = hisse_guncelle(stock_id, symbol)
-            print(f"{symbol}: {eklenen} satır güncellendi.")
-            toplam += eklenen
-        except Exception as e:
-            print(f"{symbol}: HATA — {e}")
+    for i in range(0, len(hisseler), GRUP_BOYUTU):
+        grup = hisseler[i:i + GRUP_BOYUTU]
+        print(f"Grup {i//GRUP_BOYUTU + 1}: {grup[0][1]} → {grup[-1][1]}")
+        toplam += grup_isle(grup)
+        time.sleep(2)
 
     print("=" * 60)
     print(f"Tamamlandı. Toplam {toplam} satır güncellendi.")
