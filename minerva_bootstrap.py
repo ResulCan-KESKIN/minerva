@@ -4,16 +4,17 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import time
+import os
 import warnings
 
 warnings.filterwarnings('ignore')
 
 DB_CONFIG = {
-    "host": "aws-0-eu-west-1.pooler.supabase.com",
-    "port": 6543,
-    "database": "postgres",
-    "user": "postgres.ewetkqwkjbmblutbejsh",
-    "password": "QuantShine2025."
+    "host": os.environ["EXT_DB_HOST"],
+    "port": int(os.environ["EXT_DB_PORT"]),
+    "database": os.environ["EXT_DB_NAME"],
+    "user": os.environ["EXT_DB_USER"],
+    "password": os.environ["EXT_DB_PASSWORD"],
 }
 
 conn = psycopg2.connect(**DB_CONFIG)

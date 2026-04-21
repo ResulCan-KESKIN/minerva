@@ -7,9 +7,9 @@ import os
 @st.cache_resource
 def get_conn():
     return psycopg2.connect(
-        host=os.environ.get("EXT_DB_HOST", "aws-0-eu-west-1.pooler.supabase.com"),
-        port=int(os.environ.get("EXT_DB_PORT", 6543)),
-        database=os.environ.get("EXT_DB_NAME", "postgres"),
-        user=os.environ.get("EXT_DB_USER", "postgres.ewetkqwkjbmblutbejsh"),
-        password=os.environ.get("EXT_DB_PASSWORD", "QuantShine2025.")
+        host=os.environ["EXT_DB_HOST"],
+        port=int(os.environ["EXT_DB_PORT"]),
+        database=os.environ["EXT_DB_NAME"],
+        user=os.environ["EXT_DB_USER"],
+        password=os.environ["EXT_DB_PASSWORD"],
     )
