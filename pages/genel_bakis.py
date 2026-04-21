@@ -1,7 +1,7 @@
+# pages/genel_bakis.py
 import streamlit as st
 import pandas as pd
 from db import get_conn
-from components.anomali_tablo import durum_badge
 
 def goster():
     conn = get_conn()
@@ -10,7 +10,7 @@ def goster():
 
     # Özet metrikler
     ozet = pd.read_sql("""
-        SELECT 
+        SELECT
             COUNT(DISTINCT hisse_kodu) as hisse_sayisi,
             COUNT(*) as toplam_anomali,
             COUNT(*) FILTER (WHERE durum = 'beklemede') as beklemede,
@@ -23,15 +23,18 @@ def goster():
 
     for col, label, val, renk in [
         (c1, "Takip Edilen Hisse", int(satirlar["hisse_sayisi"]), "normal"),
-        (c2, "Toplam Anomali", int(satirlar["toplam_anomali"]), "normal"),
-        (c3, "Beklemede", int(satirlar["beklemede"]), "warn"),
-        (c4, "Onaylandi", int(satirlar["onaylandi"]), "danger"),
+        (c2, "Toplam Anomali",     int(satirlar["toplam_anomali"]), "normal"),
+        (c3, "Beklemede",          int(satirlar["beklemede"]), "warn"),
+        (c4, "Onaylandi",          int(satirlar["onaylandi"]), "danger"),
     ]:
-        renkler = {"normal": "#ffffff", "warn": "#f59e0b", "danger": "#ef4444", "ok": "#10b981"}
+        renkler = {"normal": "#ffffff", "warn": "#f59e0b", "danger": "#ef4444"}
         col.markdown(f"""
-        <div style="background:#0f0f1a;border:1px solid #1e1e2e;border-radius:4px;padding:16px 20px;margin-bottom:24px">
-            <div style="font-size:10px;color:#666680;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:6px">{label}</div>
-            <div style="font-family:IBM Plex Mono;font-size:28px;color:{renkler[renk]}">{val}</div>
+        <div style="background:#0f0f1a;border:1px solid #1e1e2e;border-radius:4px;
+                    padding:16px 20px;margin-bottom:24px">
+            <div style="font-size:10px;color:#666680;letter-spacing:0.12em;
+                        text-transform:uppercase;margin-bottom:6px">{label}</div>
+            <div style="font-family:IBM Plex Mono;font-size:28px;
+                        color:{renkler[renk]}">{val}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -39,7 +42,7 @@ def goster():
     st.markdown('<div style="font-size:10px;font-weight:600;color:#3b82f6;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:12px">Hisse Bazli Anomali Ozeti</div>', unsafe_allow_html=True)
 
     hisse_ozet = pd.read_sql("""
-        SELECT 
+        SELECT
             hisse_kodu,
             COUNT(*) as toplam,
             COUNT(*) FILTER (WHERE durum = 'beklemede') as beklemede,

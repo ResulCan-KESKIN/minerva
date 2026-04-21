@@ -1,3 +1,4 @@
+# pages/degerlendirme.py
 import streamlit as st
 import pandas as pd
 from db import get_conn
@@ -8,10 +9,21 @@ def goster(secilen):
 
     st.markdown('<div style="font-size:10px;color:#666680;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px;padding-bottom:8px;border-bottom:1px solid #1e1e2e">Anomali Degerlendirme</div>', unsafe_allow_html=True)
 
+    # stock_id bul
+    id_df = pd.read_sql(
+        "SELECT id FROM stocks WHERE symbol = %s",
+        conn, params=(secilen,)
+    )
+    if id_df.empty:
+        st.warning(f"{secilen} bulunamadı.")
+        return
+    stock_id = int(id_df["id"].iloc[0])
+
     anomaliler = pd.read_sql("""
         SELECT id, baslangic_zaman, skor, durum, notlar
         FROM anomali_kayitlari
-        WHERE hisse_kodu = %s ORDER BY skor ASC
+        WHERE hisse_kodu = %s
+        ORDER BY skor ASC
     """, conn, params=(secilen,))
 
     if anomaliler.empty:
@@ -23,14 +35,21 @@ def goster(secilen):
         skor = round(satir["skor"], 4)
 
         with st.expander(f"{tarih}   |   Skor: {skor}   |   {satir['durum']}"):
+            # Anomali etrafındaki fiyat verisini çek
             df_detay = pd.read_sql("""
-                SELECT zaman, acilis, kapanis, yuksek, dusuk, hacim
-                FROM hisse_fiyatlari
-                WHERE hisse_kodu = %s
-                AND zaman BETWEEN %s::timestamptz - interval '15 days'
-                           AND %s::timestamptz + interval '15 days'
-                ORDER BY zaman
-            """, conn, params=(secilen, satir["baslangic_zaman"], satir["baslangic_zaman"]))
+                SELECT
+                    price_date AS zaman,
+                    open_price  AS acilis,
+                    high_price  AS yuksek,
+                    low_price   AS dusuk,
+                    close_price AS kapanis,
+                    volume      AS hacim
+                FROM stock_prices
+                WHERE stock_id = %s
+                AND price_date BETWEEN %s::date - interval '15 days'
+                               AND %s::date + interval '15 days'
+                ORDER BY price_date
+            """, conn, params=(stock_id, satir["baslangic_zaman"], satir["baslangic_zaman"]))
 
             if not df_detay.empty:
                 candlestick_goster(df_detay, key=f"detay_{satir['id']}", yukseklik=220)

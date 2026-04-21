@@ -1,7 +1,8 @@
+# app.py
 import streamlit as st
 import pandas as pd
 from db import get_conn
-from pages import genel_bakis, hisse_detay, degerlendirme, sistem
+from pages import genel_bakis, hisse_detay, degerlendirme, sistem, ecdf
 
 st.set_page_config(
     page_title="Minerva — Anomali Tespiti",
@@ -58,7 +59,7 @@ col_nav, col_hisse = st.columns([7, 2])
 with col_nav:
     sayfa = st.radio(
         "Sayfa",
-        ["Genel Bakis", "Hisse Detay", "Degerlendirme", "Sistem"],
+        ["Genel Bakis", "Hisse Detay", "Degerlendirme", "ECDF", "Sistem"],
         horizontal=True,
         label_visibility="collapsed"
     )
@@ -66,9 +67,14 @@ with col_nav:
 with col_hisse:
     conn = get_conn()
     hisseler = pd.read_sql(
-        "SELECT DISTINCT hisse_kodu FROM hisse_fiyatlari ORDER BY hisse_kodu", conn
+        "SELECT symbol FROM stocks WHERE is_active = true ORDER BY symbol",
+        conn
     )
-    secilen = st.selectbox("Hisse", hisseler["hisse_kodu"].tolist(), label_visibility="collapsed")
+    secilen = st.selectbox(
+        "Hisse",
+        hisseler["symbol"].tolist(),
+        label_visibility="collapsed"
+    )
 
 st.markdown("<hr style='border:none;border-top:1px solid #1e1e2e;margin:0 0 24px 0'>", unsafe_allow_html=True)
 
@@ -79,5 +85,7 @@ elif sayfa == "Hisse Detay":
     hisse_detay.goster(secilen)
 elif sayfa == "Degerlendirme":
     degerlendirme.goster(secilen)
+elif sayfa == "ECDF":
+    ecdf.goster(secilen)
 elif sayfa == "Sistem":
     sistem.goster()

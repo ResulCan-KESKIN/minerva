@@ -1,3 +1,4 @@
+# components/grafik.py
 import pandas as pd
 from streamlit_lightweight_charts import renderLightweightCharts
 
@@ -18,8 +19,10 @@ CHART_STYLE = {
 }
 
 def hazirla_gunluk(df):
-    df["zaman"] = pd.to_datetime(df["zaman"]).dt.tz_localize(None)
-    df["tarih"] = df["zaman"].dt.date
+    # zaman kolonu price_date veya zaman olabilir, ikisini de destekle
+    zaman_kolon = "zaman" if "zaman" in df.columns else "price_date"
+    df[zaman_kolon] = pd.to_datetime(df[zaman_kolon]).dt.tz_localize(None)
+    df["tarih"] = df[zaman_kolon].dt.date
     df = df.groupby("tarih").agg(
         acilis=("acilis", "first"),
         yuksek=("yuksek", "max"),
@@ -33,16 +36,15 @@ def hazirla_gunluk(df):
 def candlestick_goster(df, anomaliler=None, key="grafik", yukseklik=450):
     df = hazirla_gunluk(df)
 
-    candle_data = df[["time","acilis","yuksek","dusuk","kapanis"]].rename(columns={
-        "acilis":"open","yuksek":"high","dusuk":"low","kapanis":"close"
+    candle_data = df[["time", "acilis", "yuksek", "dusuk", "kapanis"]].rename(columns={
+        "acilis": "open", "yuksek": "high", "dusuk": "low", "kapanis": "close"
     }).to_dict("records")
-
-    hacim_data = df[["time","hacim"]].rename(columns={"hacim":"value"}).to_dict("records")
 
     markers = []
     if anomaliler is not None and not anomaliler.empty:
+        zaman_kolon = "baslangic_zaman" if "baslangic_zaman" in anomaliler.columns else "price_date"
         anomaliler["tarih"] = pd.to_datetime(
-            anomaliler["baslangic_zaman"]
+            anomaliler[zaman_kolon]
         ).dt.tz_localize(None).dt.date.astype(str)
         for _, row in anomaliler.iterrows():
             markers.append({
@@ -72,7 +74,6 @@ def candlestick_goster(df, anomaliler=None, key="grafik", yukseklik=450):
                     "wickUpColor": "#10b981",
                     "wickDownColor": "#ef4444"
                 }
-            },
-            
+            }
         ]
     }], key=key)

@@ -1,4 +1,4 @@
-name: Minerva Günlük Veri ve Anomali
+name: Minerva Günlük Güncelleme
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:          # Manuel çalıştırma butonu
 
 jobs:
-  veri-cek-ve-analiz:
+  guncelle-ve-analiz:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,31 +19,22 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri yükle
-        run: pip install psycopg2-binary yfinance pandas scikit-learn
+        run: pip install psycopg2-binary yfinance pandas numpy
 
-      - name: Veri çek
+      - name: Adj Close güncelle ve Z-Score hesapla
         env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: python veri_cek.py
+          EXT_DB_HOST: ${{ secrets.EXT_DB_HOST }}
+          EXT_DB_PORT: ${{ secrets.EXT_DB_PORT }}
+          EXT_DB_NAME: ${{ secrets.EXT_DB_NAME }}
+          EXT_DB_USER: ${{ secrets.EXT_DB_USER }}
+          EXT_DB_PASSWORD: ${{ secrets.EXT_DB_PASSWORD }}
+        run: python minerva_guncelle.py
 
       - name: Anomali tespiti
         env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: python anomali_tespit.py
-      
-      - name: Feature hesapla
-        env:
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: python feature_motor.py
+          EXT_DB_HOST: ${{ secrets.EXT_DB_HOST }}
+          EXT_DB_PORT: ${{ secrets.EXT_DB_PORT }}
+          EXT_DB_NAME: ${{ secrets.EXT_DB_NAME }}
+          EXT_DB_USER: ${{ secrets.EXT_DB_USER }}
+          EXT_DB_PASSWORD: ${{ secrets.EXT_DB_PASSWORD }}
+        run: python anomali_tespit_ext.py
