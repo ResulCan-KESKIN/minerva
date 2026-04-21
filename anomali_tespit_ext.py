@@ -47,8 +47,21 @@ def hisseleri_cek() -> list[tuple[int, str]]:
     return hisseler
 
 
+def son_islenen_tarih(symbol: str) -> str | None:
+    """anomali_kayitlari'ndaki bu hisse için en son tarih."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT MAX(baslangic_zaman::date)
+        FROM anomali_kayitlari
+        WHERE hisse_kodu = %s
+    """, (symbol,))
+    sonuc = cur.fetchone()[0]
+    cur.close()
+    return sonuc
+
+
 def zscore_verisi_cek(stock_id: int) -> pd.DataFrame:
-    """minerva_signals tablosundan log getiri Z-Score'larını çek."""
+    """minerva_signals tablosundan tüm log getiri Z-Score'larını çek (eşik için)."""
     df = pd.read_sql("""
         SELECT
             price_date,
@@ -105,66 +118,77 @@ def _kaydet(cur, symbol: str, tip: str, skor: float, tarih, kaynak: str):
     return 0
 
 
-def _ecdf_anomaliler(df: pd.DataFrame, tanimlar: list[tuple[str, str]]) -> list[tuple]:
-    """ECDF %95 eşiği ile anomali satırlarını döndür: (tip, skor, tarih, kaynak)"""
+def _ecdf_anomaliler(df_tam: pd.DataFrame, df_yeni: pd.DataFrame, tanimlar: list[tuple[str, str]]) -> list[tuple]:
+    """
+    Eşiği tüm geçmişten (df_tam) hesapla, sadece yeni günleri (df_yeni) tara.
+    """
     sonuclar = []
     for kolon, tip in tanimlar:
-        seri = df[["price_date", kolon]].dropna()
-        if len(seri) < 10:
+        tam_seri = df_tam[kolon].dropna()
+        if len(tam_seri) < 10:
             continue
-        esik = seri[kolon].abs().quantile(0.95)
-        for _, satir in seri[seri[kolon].abs() >= esik].iterrows():
+        esik = tam_seri.abs().quantile(0.95)
+        yeni_seri = df_yeni[["price_date", kolon]].dropna()
+        for _, satir in yeni_seri[yeni_seri[kolon].abs() >= esik].iterrows():
             sonuclar.append((tip, float(satir[kolon].abs()), satir["price_date"].date(), "minerva_signals"))
     return sonuclar
 
 
-def _t_dagilimi_anomaliler(df: pd.DataFrame) -> list[tuple]:
-    """t-dağılımı ile log_getiri anomalilerini tespit et: (tip, skor, tarih, kaynak)"""
-    seri = df[["price_date", "log_getiri"]].dropna()
-    if len(seri) < 5:
+def _t_dagilimi_anomaliler(df_tam: pd.DataFrame, df_yeni: pd.DataFrame) -> list[tuple]:
+    """
+    Eşiği tüm geçmişten hesapla, sadece yeni günleri tara.
+    """
+    tam_seri = df_tam["log_getiri"].dropna()
+    if len(tam_seri) < 5:
         return []
 
-    n = len(seri)
-    mu = seri["log_getiri"].mean()
-    se = seri["log_getiri"].std(ddof=1) / np.sqrt(n)
-    if se == 0:
-        return []
-
-    # %95 eşiği için iki yönlü t kritik değeri (df = n-1)
+    n = len(tam_seri)
+    mu = tam_seri.mean()
+    std = tam_seri.std(ddof=1) or 1
     t_kritik = stats.t.ppf(0.95, df=n - 1)
 
     sonuclar = []
-    for _, satir in seri.iterrows():
-        t_stat = abs((satir["log_getiri"] - mu) / (seri["log_getiri"].std(ddof=1) or 1))
+    yeni_seri = df_yeni[["price_date", "log_getiri"]].dropna()
+    for _, satir in yeni_seri.iterrows():
+        t_stat = abs((satir["log_getiri"] - mu) / std)
         if t_stat >= t_kritik:
             sonuclar.append(("anomali_t", float(t_stat), satir["price_date"].date(), "t_dagilimi"))
     return sonuclar
 
 
 def anomali_tara(stock_id: int, symbol: str):
-    df = zscore_verisi_cek(stock_id)
-    n = len(df)
+    df_tam = zscore_verisi_cek(stock_id)
+    n = len(df_tam)
 
     if n == 0:
         print(f"{symbol}: Veri yok, atlanıyor.")
         return
 
-    df["price_date"] = pd.to_datetime(df["price_date"])
+    df_tam["price_date"] = pd.to_datetime(df_tam["price_date"])
+
+    # Incremental: son işlenen günden sonrasını al
+    son_tarih = son_islenen_tarih(symbol)
+    if son_tarih is not None:
+        df_yeni = df_tam[df_tam["price_date"].dt.date > son_tarih].copy()
+    else:
+        df_yeni = df_tam.copy()  # İlk çalışma — tüm geçmiş
+
+    if df_yeni.empty:
+        print(f"{symbol}: Yeni veri yok, atlanıyor.")
+        return
+
     cur = conn.cursor()
     toplam = 0
 
     if n >= 120:
-        # Tam ECDF — 4 seri
-        anomaliler = _ecdf_anomaliler(df, ZSCORE_TANIMLARI)
+        anomaliler = _ecdf_anomaliler(df_tam, df_yeni, ZSCORE_TANIMLARI)
         mod = "ECDF 4 seri"
     elif n >= 60:
-        # Kısmi ECDF — yalnızca 60g seriler
         tanimlar_60 = [t for t in ZSCORE_TANIMLARI if "60" in t[0]]
-        anomaliler = _ecdf_anomaliler(df, tanimlar_60)
+        anomaliler = _ecdf_anomaliler(df_tam, df_yeni, tanimlar_60)
         mod = "ECDF 60g"
     else:
-        # t-dağılımı
-        anomaliler = _t_dagilimi_anomaliler(df)
+        anomaliler = _t_dagilimi_anomaliler(df_tam, df_yeni)
         mod = "t-dağılımı"
 
     for tip, skor, tarih, kaynak in anomaliler:
@@ -172,7 +196,7 @@ def anomali_tara(stock_id: int, symbol: str):
 
     conn.commit()
     cur.close()
-    print(f"{symbol} [{mod}]: {toplam} yeni anomali kaydedildi.")
+    print(f"{symbol} [{mod}]: {toplam} yeni anomali, {len(df_yeni)} gün tarandı.")
 
 
 # ═══════════════════════════════════════════════════════════════
