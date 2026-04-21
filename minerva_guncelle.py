@@ -17,7 +17,6 @@ DB_CONFIG = {
     "password": os.environ.get("EXT_DB_PASSWORD", "QuantShine2025.")
 }
 
-conn = psycopg2.connect(**DB_CONFIG)
 GRUP_BOYUTU = 50
 
 
@@ -35,7 +34,7 @@ def klasik_zscore(seri: pd.Series, pencere: int) -> pd.Series:
     return (seri - ort) / std.replace(0, np.nan)
 
 
-def hisseleri_cek() -> list[tuple[int, str]]:
+def hisseleri_cek(conn) -> list[tuple[int, str]]:
     cur = conn.cursor()
     cur.execute("""
         SELECT DISTINCT s.id, s.symbol
@@ -49,8 +48,7 @@ def hisseleri_cek() -> list[tuple[int, str]]:
     return hisseler
 
 
-def mevcut_veri_cek(stock_id: int) -> pd.DataFrame:
-    """DB'deki son 130 günlük adj_close verisini çek."""
+def mevcut_veri_cek(conn, stock_id: int) -> pd.DataFrame:
     return pd.read_sql("""
         SELECT price_date, adj_close FROM minerva_signals
         WHERE stock_id = %s
@@ -59,7 +57,7 @@ def mevcut_veri_cek(stock_id: int) -> pd.DataFrame:
     """, conn, params=(stock_id,))
 
 
-def db_yaz(stock_id: int, df: pd.DataFrame) -> int:
+def db_yaz(conn, stock_id: int, df: pd.DataFrame) -> int:
     cur = conn.cursor()
     eklenen = 0
 
@@ -100,8 +98,7 @@ def db_yaz(stock_id: int, df: pd.DataFrame) -> int:
     return eklenen
 
 
-def grup_isle(grup: list[tuple[int, str]]) -> int:
-    """50 hisseyi toplu çek, hesapla, yaz."""
+def grup_isle(conn, grup: list[tuple[int, str]]) -> int:
     tickerlar = [f"{s}.IS" for _, s in grup]
     id_map = {f"{s}.IS": sid for sid, s in grup}
 
@@ -123,7 +120,6 @@ def grup_isle(grup: list[tuple[int, str]]) -> int:
     for ticker, stock_id in id_map.items():
         symbol = ticker.replace(".IS", "")
         try:
-            # Tek veya çoklu hisse formatı
             if len(tickerlar) == 1:
                 yeni = raw[["Close"]].copy()
             else:
@@ -140,24 +136,21 @@ def grup_isle(grup: list[tuple[int, str]]) -> int:
             if yeni.empty:
                 continue
 
-            # DB'deki mevcut veriyle birleştir
-            mevcut = mevcut_veri_cek(stock_id)
+            mevcut = mevcut_veri_cek(conn, stock_id)
             mevcut["price_date"] = pd.to_datetime(mevcut["price_date"])
 
             birlesik = pd.concat([mevcut, yeni]).drop_duplicates(
                 subset="price_date", keep="last"
             ).sort_values("price_date").reset_index(drop=True)
 
-            # Z-Score hesapla
             birlesik["log_getiri"] = np.log(birlesik["adj_close"] / birlesik["adj_close"].shift(1))
             birlesik["z_log_60"]   = klasik_zscore(birlesik["log_getiri"], 60)
             birlesik["z_log_120"]  = klasik_zscore(birlesik["log_getiri"], 120)
             birlesik["rz_log_60"]  = robust_zscore(birlesik["log_getiri"], 60)
             birlesik["rz_log_120"] = robust_zscore(birlesik["log_getiri"], 120)
 
-            # Sadece son 5 günü yaz (yeni günler)
             son_5 = birlesik.tail(5)
-            eklenen = db_yaz(stock_id, son_5)
+            eklenen = db_yaz(conn, stock_id, son_5)
             print(f"  {symbol}: {eklenen} satır güncellendi.")
             toplam += eklenen
 
@@ -171,16 +164,19 @@ if __name__ == "__main__":
     print("Minerva Günlük Güncelleme Başladı (Toplu Çekme)...")
     print("=" * 60)
 
-    hisseler = hisseleri_cek()
-    print(f"{len(hisseler)} hisse güncellenecek.\n")
+    conn = psycopg2.connect(**DB_CONFIG)
+    try:
+        hisseler = hisseleri_cek(conn)
+        print(f"{len(hisseler)} hisse güncellenecek.\n")
 
-    toplam = 0
-    for i in range(0, len(hisseler), GRUP_BOYUTU):
-        grup = hisseler[i:i + GRUP_BOYUTU]
-        print(f"Grup {i//GRUP_BOYUTU + 1}: {grup[0][1]} → {grup[-1][1]}")
-        toplam += grup_isle(grup)
-        time.sleep(2)
+        toplam = 0
+        for i in range(0, len(hisseler), GRUP_BOYUTU):
+            grup = hisseler[i:i + GRUP_BOYUTU]
+            print(f"Grup {i//GRUP_BOYUTU + 1}: {grup[0][1]} → {grup[-1][1]}")
+            toplam += grup_isle(conn, grup)
+            time.sleep(2)
+    finally:
+        conn.close()
 
     print("=" * 60)
     print(f"Tamamlandı. Toplam {toplam} satır güncellendi.")
-    conn.close()

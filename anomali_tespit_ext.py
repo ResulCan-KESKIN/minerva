@@ -19,10 +19,10 @@ EXT_CONFIG = {
 
 # 4 bağımsız Z-Score sinyali
 ZSCORE_TANIMLARI = [
-    ("z_log_60",  "anomali_z60"),
-    ("z_log_120", "anomali_z120"),
-    ("rz_log_60", "anomali_rz60"),
-    ("rz_log_120","anomali_rz120"),
+    ("z_log_60",   "anomali_z60"),
+    ("z_log_120",  "anomali_z120"),
+    ("rz_log_60",  "anomali_rz60"),
+    ("rz_log_120", "anomali_rz120"),
 ]
 
 
@@ -122,10 +122,17 @@ def _ecdf_anomaliler(df_tam: pd.DataFrame, df_yeni: pd.DataFrame, tanimlar: list
         pencere_seri = df_tam[kolon].dropna().iloc[-pencere:]
         if len(pencere_seri) < 10:
             continue
-        esik = pencere_seri.abs().quantile(0.95)
-        yeni_seri = df_yeni[["price_date", kolon]].dropna()
+
+        # Eşiği float olarak al
+        esik = float(pencere_seri.abs().quantile(0.95))
+
+        # Yeni seriyi numeric'e çevir, NaN'ları düşür
+        yeni_seri = df_yeni[["price_date", kolon]].copy()
+        yeni_seri[kolon] = pd.to_numeric(yeni_seri[kolon], errors="coerce")
+        yeni_seri = yeni_seri.dropna()
+
         for _, satir in yeni_seri[yeni_seri[kolon].abs() >= esik].iterrows():
-            sonuclar.append((tip, float(satir[kolon].abs()), satir["price_date"].date(), "minerva_signals"))
+            sonuclar.append((tip, float(abs(satir[kolon])), satir["price_date"].date(), "minerva_signals"))
     return sonuclar
 
 
@@ -134,14 +141,19 @@ def _t_dagilimi_anomaliler(df_tam: pd.DataFrame, df_yeni: pd.DataFrame) -> list[
     if len(tam_seri) < 5:
         return []
     n = len(tam_seri)
-    mu = tam_seri.mean()
-    std = tam_seri.std(ddof=1) or 1
-    t_kritik = stats.t.ppf(0.95, df=n - 1)
+    mu = float(tam_seri.mean())
+    std = float(tam_seri.std(ddof=1)) or 1.0
+    t_kritik = float(stats.t.ppf(0.95, df=n - 1))
     sonuclar = []
-    for _, satir in df_yeni[["price_date", "log_getiri"]].dropna().iterrows():
-        t_stat = abs((satir["log_getiri"] - mu) / std)
+
+    yeni_seri = df_yeni[["price_date", "log_getiri"]].copy()
+    yeni_seri["log_getiri"] = pd.to_numeric(yeni_seri["log_getiri"], errors="coerce")
+    yeni_seri = yeni_seri.dropna()
+
+    for _, satir in yeni_seri.iterrows():
+        t_stat = float(abs((satir["log_getiri"] - mu) / std))
         if t_stat >= t_kritik:
-            sonuclar.append(("anomali_t", float(t_stat), satir["price_date"].date(), "t_dagilimi"))
+            sonuclar.append(("anomali_t", t_stat, satir["price_date"].date(), "t_dagilimi"))
     return sonuclar
 
 
