@@ -47,7 +47,6 @@ def goster(secilen: str = None):
 
     semboller = hisseler_df["symbol"].tolist()
 
-    # Mevcut seçili hisseyle eşleştir (.IS varsa temizle)
     temiz_secilen = secilen.replace(".IS", "") if secilen else None
     default_idx = semboller.index(temiz_secilen) if temiz_secilen in semboller else 0
 
@@ -72,15 +71,15 @@ def goster(secilen: str = None):
 
     stock_id = int(id_df["id"].iloc[0])
 
-    # ── Z-Score verisi ──
+    # ── Z-Score verisi (volume_analysis) ──
     df = pd.read_sql("""
         SELECT
             price_date,
-            z_log_60,
-            z_log_120,
-            rz_log_60,
-            rz_log_120
-        FROM minerva_signals
+            z_score_60,
+            z_score_120,
+            z_score_robust_60,
+            z_score_robust_120
+        FROM volume_analysis
         WHERE stock_id = %s
         ORDER BY price_date
     """, ext_conn, params=(stock_id,))
@@ -107,10 +106,10 @@ def goster(secilen: str = None):
 
     # ── ECDF Grafiği ──
     seriler = [
-        ("Z-Score 60g",         "z_log_60",   "#3b82f6"),
-        ("Z-Score 120g",        "z_log_120",  "#06b6d4"),
-        ("Robust Z-Score 60g",  "rz_log_60",  "#f59e0b"),
-        ("Robust Z-Score 120g", "rz_log_120", "#10b981"),
+        ("Z-Score 60g",         "z_score_60",         "#3b82f6"),
+        ("Z-Score 120g",        "z_score_120",         "#06b6d4"),
+        ("Robust Z-Score 60g",  "z_score_robust_60",  "#f59e0b"),
+        ("Robust Z-Score 120g", "z_score_robust_120", "#10b981"),
     ]
 
     try:
@@ -134,7 +133,6 @@ def goster(secilen: str = None):
                 )
             ))
 
-        # Eşik çizgileri: ±2 (≈%95), ±3 (≈%99)
         for esik, etiket_esik, opaklık in [
             (-3, "−3σ", 0.4), (3, "+3σ", 0.4),
             (-2, "−2σ", 0.6), (2, "+2σ", 0.6),
@@ -197,6 +195,8 @@ def goster(secilen: str = None):
     for i, (etiket, kolon, renk) in enumerate(seriler):
         with cols[i]:
             s = df[kolon].dropna()
+            if s.empty:
+                continue
             asiri = int((s.abs() > 2).sum())
             cok_asiri = int((s.abs() > 3).sum())
             st.markdown(f"""
@@ -228,7 +228,7 @@ def goster(secilen: str = None):
             </div>
             """, unsafe_allow_html=True)
 
-    # ── Anomali Tablosu (bu hisse için kayıtlılar) ──
+    # ── Anomali Tablosu ──
     st.markdown("""
     <div style="font-family:IBM Plex Mono;font-size:11px;color:#444460;
                 letter-spacing:0.08em;margin:24px 0 12px 0;
@@ -260,7 +260,6 @@ def goster(secilen: str = None):
     else:
         def tip_badge(tip):
             renk_map = {
-                "kesin_anomali": ("#ef4444", "● KESİN"),
                 "anomali_z60":   ("#3b82f6", "Z-60"),
                 "anomali_z120":  ("#06b6d4", "Z-120"),
                 "anomali_rz60":  ("#f59e0b", "RZ-60"),

@@ -19,10 +19,10 @@ def get_ext_conn():
 
 
 SERILER = [
-    ("z_log_60",   60,  "#3b82f6"),
-    ("z_log_120",  120, "#06b6d4"),
-    ("rz_log_60",  60,  "#f59e0b"),
-    ("rz_log_120", 120, "#10b981"),
+    ("z_score_60",         60,  "#3b82f6"),
+    ("z_score_120",        120, "#06b6d4"),
+    ("z_score_robust_60",  60,  "#f59e0b"),
+    ("z_score_robust_120", 120, "#10b981"),
 ]
 
 
@@ -58,7 +58,7 @@ def hisse_tara(df: pd.DataFrame, baslangic: date, bitis: date) -> dict:
 
         anomali_sayisi += int((mask_aralik & mask_anomali).sum())
         if not gunler.empty:
-            max_skor = max(max_skor, gunler["skor"].max())
+            max_skor = max(max_skor, float(gunler["skor"].max()))
 
     return {
         "anomali_sayisi": int(anomali_sayisi),
@@ -100,7 +100,7 @@ def goster():
     hisseler_df = pd.read_sql("""
         SELECT DISTINCT s.id, s.symbol
         FROM stocks s
-        INNER JOIN minerva_signals ms ON ms.stock_id = s.id
+        INNER JOIN volume_analysis va ON va.stock_id = s.id
         WHERE s.is_active = true
         ORDER BY s.symbol
     """, ext_conn)
@@ -120,8 +120,12 @@ def goster():
 
     for i, (stock_id, symbol) in enumerate(hisseler_df.itertuples(index=False)):
         df = pd.read_sql("""
-            SELECT price_date, z_log_60, z_log_120, rz_log_60, rz_log_120
-            FROM minerva_signals
+            SELECT price_date,
+                   z_score_60,
+                   z_score_120,
+                   z_score_robust_60,
+                   z_score_robust_120
+            FROM volume_analysis
             WHERE stock_id = %s
             ORDER BY price_date
         """, ext_conn, params=(int(stock_id),))
@@ -133,7 +137,7 @@ def goster():
         sonuc = hisse_tara(df, baslangic, bitis)
         if sonuc["anomali_sayisi"] > 0:
             sonuclar.append({
-                "Hisse":         symbol,
+                "Hisse":          symbol,
                 "Anomali Sayısı": sonuc["anomali_sayisi"],
                 "Max Skor":       sonuc["max_skor"],
                 "_detay":         sonuc["detay"],

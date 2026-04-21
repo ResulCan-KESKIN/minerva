@@ -1,12 +1,12 @@
-name: Minerva Günlük Güncelleme
+name: Minerva Günlük Anomali Tespiti
 
 on:
   schedule:
     - cron: '0 17 * * 1-5'  # Her hafta içi 17:00 UTC = 20:00 Türkiye
-  workflow_dispatch:          # Manuel çalıştırma butonu
+  workflow_dispatch:
 
 jobs:
-  guncelle-ve-analiz:
+  anomali-tespiti:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,16 +19,7 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri yükle
-        run: pip install psycopg2-binary yfinance pandas numpy scipy
-
-      - name: Adj Close güncelle ve Z-Score hesapla
-        env:
-          EXT_DB_HOST: ${{ secrets.EXT_DB_HOST }}
-          EXT_DB_PORT: ${{ secrets.EXT_DB_PORT }}
-          EXT_DB_NAME: ${{ secrets.EXT_DB_NAME }}
-          EXT_DB_USER: ${{ secrets.EXT_DB_USER }}
-          EXT_DB_PASSWORD: ${{ secrets.EXT_DB_PASSWORD }}
-        run: python minerva_guncelle.py
+        run: pip install psycopg2-binary pandas numpy scipy
 
       - name: Anomali tespiti
         env:
