@@ -85,10 +85,10 @@ def goster():
         SELECT
             COUNT(*) as toplam,
             COUNT(*) FILTER (WHERE durum = 'beklemede') as beklemede,
-            COUNT(*) FILTER (WHERE durum = '🔴 onaylandi') as onaylandi,
-            COUNT(*) FILTER (WHERE durum = '🟢 ret') as reddedildi,
-            COUNT(*) FILTER (WHERE anomali_tipi = 'kesin_anomali') as kesin,
-            COUNT(*) FILTER (WHERE anomali_tipi = 'soft_anomali') as soft
+            COUNT(*) FILTER (WHERE durum = 'onaylandi') as onaylandi,
+            COUNT(*) FILTER (WHERE durum = 'ret') as reddedildi,
+            COUNT(*) FILTER (WHERE kaynak = 't_dagilimi') as t_dagilimi,
+            COUNT(*) FILTER (WHERE kaynak = 'volume_analysis') as ecdf
         FROM anomali_kayitlari
     """, conn)
 
@@ -99,8 +99,8 @@ def goster():
         (c2, "Beklemede",   int(r["beklemede"]),   "#f59e0b"),
         (c3, "Onaylandi",   int(r["onaylandi"]),   "#ef4444"),
         (c4, "Reddedildi",  int(r["reddedildi"]),  "#10b981"),
-        (c5, "Kesin",       int(r["kesin"]),       "#ef4444"),
-        (c6, "Soft",        int(r["soft"]),        "#f59e0b"),
+        (c5, "ECDF",        int(r["ecdf"]),        "#3b82f6"),
+        (c6, "T-Dağılım",   int(r["t_dagilimi"]), "#a78bfa"),
     ]:
         col.markdown(f"""
         <div style="background:#0f0f1a;border:1px solid #1e1e2e;border-radius:4px;

@@ -7,9 +7,9 @@
 | UI | Streamlit (Python) |
 | Veritabanı | PostgreSQL — Supabase (psycopg2) |
 | Anomali Yöntemi | ECDF %95 eşiği (kayan pencere) + t-dağılımı |
-| Veri Kaynağı | Yahoo Finance (`yfinance`) |
+| Z-Score Kaynağı | `volume_analysis` tablosu (Supabase trigger ile güncellenir) |
 | Otomasyon | GitHub Actions — hafta içi 17:00 UTC (20:00 TR) |
-| Tema | Koyu (#0a0a0f), IBM Plex Mono, mavi/yeşil/turuncu/kırmızı |
+| Tema | Koyu (#0a0a0f), IBM Plex Mono |
 
 ---
 
@@ -19,16 +19,18 @@
 minerva_anomali/
 ├── app.py                    # Streamlit giriş noktası, navigasyon
 ├── db.py                     # DB bağlantısı (@st.cache_resource)
-├── minerva_bootstrap.py      # Tek seferlik — 10 yıllık geçmiş veri yükleme
-├── minerva_guncelle.py       # Günlük fiyat + Z-Score güncelleme
-├── anomali_tespit_ext.py     # Günlük anomali tespiti (incremental)
+├── anomali_tespit_ext.py     # Günlük anomali tespiti (paralel, incremental)
 ├── pages/
 │   ├── genel_bakis.py        # Tüm hisse özet
-│   ├── hisse_detay.py        # Tek hisse detay + grafik
+│   ├── hisse_detay.py        # Tek hisse detay + grafik + Z-Score
 │   ├── degerlendirme.py      # Anomali onay/ret arayüzü
 │   ├── ecdf.py               # ECDF dağılım grafiği
 │   ├── backtest.py           # Tarih aralığında geriye dönük tarama
-│   └── sistem.py             # Sistem durumu
+│   └── sistem.py             # Sistem ve veri durumu
+├── components/
+│   ├── grafik.py             # Candlestick grafik bileşeni
+│   ├── anomali_tablo.py      # Anomali tablosu bileşeni
+│   └── zscore_panel.py       # Z-Score metrik kartları + grafik
 └── .github/workflows/
     └── gunluk_calisma.yml    # GitHub Actions pipeline
 ```
@@ -44,28 +46,39 @@ minerva_anomali/
 | symbol | text | THYAO, GARAN, ... |
 | is_active | bool | Aktif hisse kontrolü |
 
-### `minerva_signals`
+### `stock_prices`
 | Sütun | Tip | Açıklama |
 |-------|-----|----------|
 | stock_id | int | FK → stocks.id |
 | price_date | date | İşlem günü |
-| adj_close | float | Düzeltilmiş kapanış |
-| log_getiri | float | ln(P_t / P_{t-1}) |
-| z_log_60 | float | Klasik Z-Score (60g pencere) |
-| z_log_120 | float | Klasik Z-Score (120g pencere) |
-| rz_log_60 | float | Robust Z-Score (60g pencere) |
-| rz_log_120 | float | Robust Z-Score (120g pencere) |
+| open_price | float | Açılış fiyatı |
+| high_price | float | Gün yükseği |
+| low_price | float | Gün düşüğü |
+| close_price | float | Kapanış fiyatı |
+| volume | float | İşlem hacmi |
+
+### `volume_analysis`
+| Sütun | Tip | Açıklama |
+|-------|-----|----------|
+| stock_id | int | FK → stocks.id |
+| price_date | date | İşlem günü |
+| z_score_60 | float | Klasik Z-Score (60g pencere) |
+| z_score_120 | float | Klasik Z-Score (120g pencere) |
+| z_score_robust_60 | float | Robust Z-Score — MAD (60g) |
+| z_score_robust_120 | float | Robust Z-Score — MAD (120g) |
+
+> `volume_analysis` Supabase trigger ile günlük otomatik güncellenir.
 
 ### `anomali_kayitlari`
 | Sütun | Tip | Açıklama |
 |-------|-----|----------|
 | id | int | PK |
 | hisse_kodu | text | THYAO, GARAN, ... |
-| anomali_tipi | text | anomali_z60 / z120 / rz60 / rz120 / anomali_t |
-| skor | float | Anomali skoru (abs Z veya t-istatistiği) |
+| anomali_tipi | text | anomali_z60 / anomali_z120 / anomali_rz60 / anomali_rz120 / anomali_t |
+| skor | float | Anomali skoru |
 | baslangic_zaman | timestamp | Anomali tarihi |
 | durum | text | beklemede / onaylandi / ret |
-| kaynak | text | minerva_signals / t_dagilimi |
+| kaynak | text | volume_analysis / t_dagilimi |
 
 ---
 
@@ -75,19 +88,24 @@ minerva_anomali/
 
 | Veri | Yöntem | Seriler |
 |------|--------|---------|
-| ≥ 120 gün | ECDF kayan pencere | z_log_60, z_log_120, rz_log_60, rz_log_120 |
-| 60–119 gün | ECDF kayan pencere | z_log_60, rz_log_60 |
-| < 60 gün | t-dağılımı | log_getiri |
+| ≥ 120 gün | ECDF kayan pencere | z_score_60, z_score_120, z_score_robust_60, z_score_robust_120 |
+| 60–119 gün | ECDF kayan pencere | z_score_60, z_score_robust_60 |
+| < 60 gün | t-dağılımı (`stock_prices.close_price`) | log getiri |
 
 ### ECDF eşiği (kayan pencere)
-- `z_log_60` / `rz_log_60` → son 60 günün z-score dağılımından `quantile(0.95)`
-- `z_log_120` / `rz_log_120` → son 120 günün z-score dağılımından `quantile(0.95)`
-- Z-score'ların kendisi tüm geçmişten hesaplanmıştır (`minerva_signals`)
+- 60g seriler → son 60 günün z-score dağılımından `quantile(0.95)`
+- 120g seriler → son 120 günün z-score dağılımından `quantile(0.95)`
 
-### Incremental çalışma
-- Her çalışmada `anomali_kayitlari`'ndaki son kayıtlı tarih kontrol edilir
-- Yalnızca o tarihten sonraki günler işlenir
-- İlk çalışmada tüm geçmiş işlenir
+### Incremental çalışma (hisse seviyesi)
+- `anomali_kayitlari`'nda zaten kaydı olan hisseler tamamen atlanır (`islenmis_hisseler()`)
+- İlk çalışmada tüm geçmiş taranır
+- Tekrar çalışmada yalnızca işlenmemiş hisseler işlenir
+- `ON CONFLICT DO NOTHING` ile çift kayıt önlenir
+
+### Paralel işlem
+- `ThreadPoolExecutor(max_workers=4)` ile 4 hisse eş zamanlı taranır
+- Her worker kendi bağlantısını açar/kapatır (`get_conn()` per-worker)
+- Toplu yazma `executemany` ile yapılır (`_kaydet_toplu`)
 
 ---
 
@@ -96,63 +114,46 @@ minerva_anomali/
 ```
 GitHub Actions (17:00 UTC / 20:00 TR)
 │
-├── python minerva_guncelle.py
-│   └── yfinance → son 130 günlük adj_close çek
-│       → log_getiri + 4 Z-Score hesapla
-│       → minerva_signals'a UPSERT (son 5 gün)
-│
 └── python anomali_tespit_ext.py
-    └── minerva_signals'dan Z-Score çek
-        → kayan ECDF / t-dağılımı eşiği hesapla
-        → yeni anomalileri anomali_kayitlari'na yaz
+    ├── Supabase trigger volume_analysis'i zaten güncelledi
+    ├── islenmis_hisseler() → işlenmiş hisseleri atla
+    └── ThreadPoolExecutor (4 worker)
+        ├── Her hisse: zscore_verisi_cek → ECDF / t-dağılımı eşiği
+        └── _kaydet_toplu → anomali_kayitlari (ON CONFLICT DO NOTHING)
 ```
+
+---
+
+## Anomali Tipleri ve Renk Kodları
+
+| Tip | Renk | Açıklama |
+|-----|------|----------|
+| `anomali_z60` | `#3b82f6` mavi | Klasik Z-Score 60g eşiği aşımı |
+| `anomali_z120` | `#06b6d4` camgöbeği | Klasik Z-Score 120g eşiği aşımı |
+| `anomali_rz60` | `#f59e0b` sarı | Robust Z-Score (MAD) 60g eşiği aşımı |
+| `anomali_rz120` | `#10b981` yeşil | Robust Z-Score (MAD) 120g eşiği aşımı |
+| `anomali_t` | `#a78bfa` mor | t-dağılımı ile tespit (az veri) |
 
 ---
 
 ## Sayfalar
 
-### Genel Bakış
-- Tüm aktif hisseler için anomali sayısı özeti
-- Beklemede / onaylanan / reddedilen dağılımı
-
-### Hisse Detay
-- Fiyat + anomali grafiği, son anomali listesi
-
-### Değerlendirme
-- Beklemedeki anomalileri onayla / reddet
-- Analist not alanı
-
-### ECDF
-- Seçilen hisse için 4 serinin empirik dağılım grafiği
-- İstatistik kartları (μ, σ, min/max, |z|>2, |z|>3 gün sayısı)
-- Hisseye ait kayıtlı anomali tablosu
-
-### Backtest
-- Tarih aralığı seç → tüm hisseleri tara
-- Her gün için o günden önceki kayan pencere ECDF eşiği kullanılır
-- Anomali sayısına göre sıralı hisse listesi + detay expander
-
-### Sistem
-- DB bağlantı durumu ve son güncelleme bilgileri
+| Sayfa | Açıklama |
+|-------|----------|
+| Genel Bakış | Tüm hisseler anomali özeti |
+| Hisse Detay | Fiyat grafiği + Z-Score paneli + anomali tablosu |
+| Değerlendirme | Bekleyen anomalileri onayla / reddet |
+| ECDF | 4 serinin empirik dağılım grafiği + istatistik kartları |
+| Backtest | Tarih aralığı seç → kayan ECDF ile tüm hisseleri tara |
+| Sistem | stock_prices / volume_analysis veri durumu + anomali istatistikleri |
 
 ---
 
 ## Çalıştırma
 
 ```bash
-# Ortam değişkenlerini yükle (.env)
-# Windows: set EXT_DB_HOST=...
-# Linux/Mac: export EXT_DB_HOST=...
-
-# Uygulama
+# .env dosyasını doldur
 streamlit run app.py
-
-# Günlük pipeline (GitHub Actions'da otomatik)
-python minerva_guncelle.py
-python anomali_tespit_ext.py
-
-# Tek seferlik — ilk veri yükleme
-python minerva_bootstrap.py
 ```
 
 ---
