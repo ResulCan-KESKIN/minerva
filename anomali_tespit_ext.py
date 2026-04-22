@@ -1,14 +1,13 @@
 # anomali_tespit_ext.py — volume_analysis tablosundan Z-Score anomali tespiti
 # Yöntem: ≥120g → ECDF 4 seri | 60-119g → ECDF 60g | 0-59g → t-dağılımı
+# Incremental: sadece son işlemden sonraki yeni günleri tarar
 import psycopg2
-import psycopg2.pool
 import pandas as pd
 import numpy as np
 from scipy import stats
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import warnings
-import time
 
 warnings.filterwarnings('ignore')
 
@@ -33,16 +32,16 @@ ZSCORE_60 = [
 ]
 
 PENCERE = {"60": 60, "120": 120}
-MAX_WORKERS = 4  # Paralel hisse sayısı
+MAX_WORKERS = 4
+
+
+def get_conn():
+    return psycopg2.connect(**EXT_CONFIG)
 
 
 # ═══════════════════════════════════════════════════════════════
 # BÖLÜM 1 — VERİ ÇEKME
 # ═══════════════════════════════════════════════════════════════
-
-def get_conn():
-    return psycopg2.connect(**EXT_CONFIG)
-
 
 def hisseleri_cek() -> list[tuple[int, str]]:
     conn = get_conn()
@@ -60,15 +59,16 @@ def hisseleri_cek() -> list[tuple[int, str]]:
     return hisseler
 
 
-def islenmis_hisseler() -> set[str]:
-    """Zaten anomali_kayitlari'nda olan hisseleri döndür."""
-    conn = get_conn()
+def son_islenen_tarih(conn, symbol: str):
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT hisse_kodu FROM anomali_kayitlari")
-    hisseler = {r[0] for r in cur.fetchall()}
+    cur.execute("""
+        SELECT MAX(baslangic_zaman::date)
+        FROM anomali_kayitlari
+        WHERE hisse_kodu = %s
+    """, (symbol,))
+    sonuc = cur.fetchone()[0]
     cur.close()
-    conn.close()
-    return hisseler
+    return sonuc
 
 
 def zscore_verisi_cek(conn, stock_id: int) -> pd.DataFrame:
@@ -91,24 +91,27 @@ def fiyat_verisi_cek(conn, stock_id: int) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════
-# BÖLÜM 2 — ANOMALİ TESPİTİ
+# BÖLÜM 2 — FEATURE MÜHENDİSLİĞİ (inaktif — ileriki fazlar için)
+# ═══════════════════════════════════════════════════════════════
+
+def fiyat_hacim_uyumsuzlugu(df):
+    """İNAKTİF — ileriki fazlar için hazır bekliyor."""
+    pass
+
+
+# ═══════════════════════════════════════════════════════════════
+# BÖLÜM 3 — ANOMALİ TESPİTİ
 # ═══════════════════════════════════════════════════════════════
 
 def _kaydet_toplu(cur, kayitlar: list) -> int:
-    """Tüm anomalileri tek sorguda yaz."""
     if not kayitlar:
         return 0
-
-    args = []
-    for symbol, tip, skor, tarih, kaynak in kayitlar:
-        args.append((symbol, tip, float(skor), tarih, "beklemede", kaynak))
-
     cur.executemany("""
         INSERT INTO anomali_kayitlari
             (hisse_kodu, anomali_tipi, skor, baslangic_zaman, durum, kaynak)
         VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT DO NOTHING
-    """, args)
+    """, kayitlar)
     return cur.rowcount
 
 
@@ -141,8 +144,7 @@ def _t_dagilimi_anomaliler(conn, stock_id: int, df_yeni: pd.DataFrame) -> list:
         return []
     mu = float(df_fiyat["log_getiri"].mean())
     std = float(df_fiyat["log_getiri"].std(ddof=1)) or 1.0
-    n = len(df_fiyat)
-    t_kritik = float(stats.t.ppf(0.95, df=n - 1))
+    t_kritik = float(stats.t.ppf(0.95, df=len(df_fiyat) - 1))
     yeni_tarihler = set(pd.to_datetime(df_yeni["price_date"]).dt.date)
     sonuclar = []
     for _, satir in df_fiyat[df_fiyat["price_date"].dt.date.isin(yeni_tarihler)].iterrows():
@@ -153,7 +155,6 @@ def _t_dagilimi_anomaliler(conn, stock_id: int, df_yeni: pd.DataFrame) -> list:
 
 
 def anomali_tara(stock_id: int, symbol: str) -> str:
-    """Her hisse için ayrı bağlantı açar — paralel çalışmaya uygun."""
     try:
         conn = get_conn()
         df_tam = zscore_verisi_cek(conn, stock_id)
@@ -164,11 +165,17 @@ def anomali_tara(stock_id: int, symbol: str) -> str:
             return f"{symbol}: Veri yok."
 
         df_tam["price_date"] = pd.to_datetime(df_tam["price_date"])
-        df_yeni = df_tam.copy()  # İlk çalışmada tüm geçmiş
+
+        # Sadece yeni günleri işle
+        son_tarih = son_islenen_tarih(conn, symbol)
+        if son_tarih is not None:
+            df_yeni = df_tam[df_tam["price_date"].dt.date > son_tarih].copy()
+        else:
+            df_yeni = df_tam.copy()
 
         if df_yeni.empty:
             conn.close()
-            return f"{symbol}: Yeni veri yok."
+            return f"{symbol}: Yeni veri yok, atlanıyor."
 
         if n >= 120:
             anomaliler = _ecdf_anomaliler(df_tam, df_yeni, ZSCORE_4)
@@ -180,8 +187,10 @@ def anomali_tara(stock_id: int, symbol: str) -> str:
             anomaliler = _t_dagilimi_anomaliler(conn, stock_id, df_yeni)
             mod = "t-dağılımı"
 
-        # Kayıtları ekle
-        kayitlar = [(symbol, tip, skor, tarih, kaynak) for tip, skor, tarih, kaynak in anomaliler]
+        kayitlar = [
+            (symbol, tip, float(skor), tarih, "beklemede", kaynak)
+            for tip, skor, tarih, kaynak in anomaliler
+        ]
 
         cur = conn.cursor()
         toplam = _kaydet_toplu(cur, kayitlar)
@@ -189,35 +198,28 @@ def anomali_tara(stock_id: int, symbol: str) -> str:
         cur.close()
         conn.close()
 
-        return f"{symbol} [{mod}]: {toplam} anomali kaydedildi."
+        return f"{symbol} [{mod}]: {toplam} yeni anomali, {len(df_yeni)} gün tarandı."
 
     except Exception as e:
         return f"{symbol}: HATA — {e}"
 
 
 # ═══════════════════════════════════════════════════════════════
-# BÖLÜM 3 — ÇALIŞTIR
+# BÖLÜM 4 — ÇALIŞTIR
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("Minerva Anomali Tespiti Başladı...")
+    print("Minerva Anomali Tespiti Başladı (Incremental)...")
     print("=" * 60)
 
     hisseler = hisseleri_cek()
-    islenmis = islenmis_hisseler()
+    print(f"Toplam {len(hisseler)} hisse taranacak.\n")
 
-    # Daha önce işlenenleri atla
-    bekleyen = [(sid, sym) for sid, sym in hisseler if sym not in islenmis]
-    atlanan = len(hisseler) - len(bekleyen)
-
-    print(f"Toplam: {len(hisseler)} | Atlanıyor: {atlanan} | İşlenecek: {len(bekleyen)}\n")
-
-    # Paralel çalıştır
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(anomali_tara, sid, sym): sym for sid, sym in bekleyen}
+        futures = {executor.submit(anomali_tara, sid, sym): sym for sid, sym in hisseler}
         for i, future in enumerate(as_completed(futures), 1):
             sonuc = future.result()
-            print(f"[{i}/{len(bekleyen)}] {sonuc}")
+            print(f"[{i}/{len(hisseler)}] {sonuc}")
 
     print("=" * 60)
     print("Tarama tamamlandı.")
