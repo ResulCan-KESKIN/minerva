@@ -1,0 +1,43 @@
+name: Minerva Günlük Otomasyon
+
+on:
+  schedule:
+    # Hafta içi (Pazartesi - Cuma) her gün Türkiye saati ile 19:30'da çalışır (UTC: 16:30)
+    - cron: '30 16 * * 1-5'
+  workflow_dispatch: # GitHub arayüzünden manuel tetikleme butonu ekler
+
+jobs:
+  veri-guncelle-ve-tara:
+    runs-on: ubuntu-latest
+    
+    # GitHub Secrets'tan alınacak veritabanı ayarları
+    env:
+      EXT_DB_HOST: ${{ secrets.EXT_DB_HOST }}
+      EXT_DB_PORT: ${{ secrets.EXT_DB_PORT }}
+      EXT_DB_NAME: ${{ secrets.EXT_DB_NAME }}
+      EXT_DB_USER: ${{ secrets.EXT_DB_USER }}
+      EXT_DB_PASSWORD: ${{ secrets.EXT_DB_PASSWORD }}
+      
+    steps:
+      - name: Kodu Çek (Checkout)
+        uses: actions/checkout@v3
+
+      - name: Python 3.11 Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Gerekli Kütüphaneleri Yükle
+        run: |
+          python -m pip install --upgrade pip
+          # Uygulamanın gereksinimlerini yüklüyoruz
+          pip install -r app/requirements.txt
+          
+      - name: 1. Adım - Günlük Kapanış Verilerini Çek (Yahoo Finance)
+        run: |
+          python minerva_anomali/veri_guncelle.py
+          
+      - name: 2. Adım - Fiyat Sıkışması (Faz 1-4) Taramasını Çalıştır
+        run: |
+          # Python'un fiyat_sikismasi klasöründeki modülleri bulabilmesi için PYTHONPATH ekliyoruz
+          PYTHONPATH=fiyat_sikismasi python fiyat_sikismasi/tarama_calistir.py
