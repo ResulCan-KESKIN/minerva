@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -m pytest tests/test_radar1.py -v)",
+      "Bash(python -c \"from db import get_conn; conn=get_conn\\(\\); cur=conn.cursor\\(\\); cur.execute\\('SELECT COUNT\\(*\\) FROM stocks WHERE is_active=true'\\); print\\('Bağlantı OK, aktif hisse:', cur.fetchone\\(\\)[0]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from components.faz_kart import faz_metrikler_goster; print\\('import OK'\\)\")",
+      "Bash(python migration_run.py)",
+      "Bash(git add *)",
+      "Bash(git rm *)",
+      "Bash(git check-ignore *)",
+      "Bash(git rebase *)"
+    ]
+  }
+}

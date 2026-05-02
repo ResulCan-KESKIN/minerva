@@ -1,0 +1,12 @@
+streamlit
+psycopg2-binary
+pandas
+numpy
+scipy
+plotly
+yfinance
+scikit-learn
+streamlit-lightweight-charts
+python-dotenv
+requests
+beautifulsoup4
