@@ -41,6 +41,3 @@ jobs:
         run: |
           # Python'un fiyat_sikismasi klasöründeki modülleri bulabilmesi için PYTHONPATH ekliyoruz
           PYTHONPATH=fiyat_sikismasi python fiyat_sikismasi/tarama_calistir.py
-          
-      # Not: Eğer anomali tarama scriptiniz (örn: anomali_tespit_ext.py) varsa 
-      # bir sonraki adım olarak buraya benzer şekilde ekleyebilirsiniz.
