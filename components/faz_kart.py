@@ -1,7 +1,7 @@
 """
 Faz 2 / 3 / 4 metrik kartları.
 Radar 1: Pencere · Fiziki Limit · Efor Rasyosu · Şok Günü · Şok Hacim
-Radar 2 v2: Geçen Gün · AVWAP Sapma · Efor Rasyosu · Fiziki Limit · Şok Hacim
+Radar 2 v2: Geçen Gün · AVWAP Sapma · Efor (20g) · Fiziki Limit · Şok Günü · Şok Hacim
 """
 
 import streamlit as st
@@ -35,9 +35,9 @@ def faz_metrikler_goster(
     avwap_sapma: float | None = None,
     kopus_yonu: str | None = None,
 ):
-    c1, c2, c3, c4, c5 = st.columns(5)
-
     if radar == "radar2" and avwap_sapma is not None:
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+
         # ── Radar 2 v2 kartları ───────────────────────────────────────────────
         # Kart 1: Geçen Gün
         with c1:
@@ -73,13 +73,20 @@ def faz_metrikler_goster(
             renk = "#22c55e" if (fiziki_limit or 0) >= 0.30 else "#4d8ef0"
             _kart("Fiziki Limit", val, renk, "emilim hacim / dolaşım")
 
-        # Kart 5: Şok Hacim
+        # Kart 5: Şok Günü
         with c5:
+            val  = str(sok_sayisi) if sok_sayisi is not None else "—"
+            renk = "#d4820a" if (sok_sayisi or 0) >= 3 else "#e0e0f0"
+            _kart("Şok Günü", val, renk, "anomali gün sayısı")
+
+        # Kart 6: Şok Hacim
+        with c6:
             val  = f"%{sok_hacim_yuzdesi:.1f}" if sok_hacim_yuzdesi is not None else "—"
             renk = "#22c55e" if (sok_hacim_yuzdesi or 0) >= 30 else "#e0e0f0"
-            _kart("Şok Hacim", val, renk, f"şok günleri / emilim")
+            _kart("Şok Hacim", val, renk, "şok günleri / emilim")
 
     else:
+        c1, c2, c3, c4, c5 = st.columns(5)
         # ── Radar 1 kartları (mevcut davranış) ───────────────────────────────
         with c1:
             _kart("Pencere", f"{pencere_gun}g" if pencere_gun else "—")
