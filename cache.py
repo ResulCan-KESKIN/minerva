@@ -107,6 +107,8 @@ def liderlik_liste(gun_siniri: int = 90) -> pd.DataFrame:
                 pencere_uzunlugu,
                 kutu_baslangic, kutu_bitis,
                 fiziki_limit::float      AS fiziki_limit,
+                milat_tipi, kopus_yonu,
+                fiyat_avwap_sapma::float AS fiyat_avwap_sapma,
                 ((COALESCE(efor_rasyosu,0) * 2)
                  + (COALESCE(sok_sayisi,0) * 3)
                  + (COALESCE(sok_hacim_yuzdesi,0) / 10.0)) AS master_skor,
